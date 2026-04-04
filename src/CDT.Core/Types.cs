@@ -334,3 +334,105 @@ public enum PtLineLocation
     Right,
     OnLine,
 }
+
+// =============================================================================
+// Integer coordinate types (deterministic / exact-arithmetic API)
+// =============================================================================
+
+/// <summary>
+/// 2D point with 64-bit integer coordinates.
+/// Blittable value type — safe for use in unmanaged / Burst contexts.
+/// </summary>
+public readonly struct V2i : IEquatable<V2i>
+{
+    /// <summary>X-coordinate.</summary>
+    public readonly long X;
+
+    /// <summary>Y-coordinate.</summary>
+    public readonly long Y;
+
+    /// <summary>Initializes a new point with the given coordinates.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public V2i(long x, long y) { X = x; Y = y; }
+
+    /// <summary>Zero point (0, 0).</summary>
+    public static readonly V2i Zero = new(0L, 0L);
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Equals(V2i other) => X == other.X && Y == other.Y;
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => obj is V2i v && Equals(v);
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(X, Y);
+
+    /// <inheritdoc/>
+    public static bool operator ==(V2i a, V2i b) => a.Equals(b);
+
+    /// <inheritdoc/>
+    public static bool operator !=(V2i a, V2i b) => !a.Equals(b);
+
+    /// <inheritdoc/>
+    public override string ToString() => $"({X}, {Y})";
+}
+
+/// <summary>
+/// 2D axis-aligned bounding box with 64-bit integer coordinates.
+/// Sentinels: <c>Min</c> starts at (<see cref="long.MaxValue"/>, <see cref="long.MaxValue"/>)
+/// and <c>Max</c> starts at (<see cref="long.MinValue"/>, <see cref="long.MinValue"/>)
+/// so that the first <see cref="Envelop(long, long)"/> call sets both correctly.
+/// </summary>
+public struct Box2i
+{
+    /// <summary>Minimum corner.</summary>
+    public V2i Min;
+
+    /// <summary>Maximum corner.</summary>
+    public V2i Max;
+
+    /// <summary>Creates an empty box (sentinel values — no point contained yet).</summary>
+    public Box2i()
+    {
+        Min = new V2i(long.MaxValue, long.MaxValue);
+        Max = new V2i(long.MinValue, long.MinValue);
+    }
+
+    /// <summary>Expands the box to include the given coordinates.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Envelop(long x, long y)
+    {
+        if (x < Min.X) Min = new V2i(x, Min.Y);
+        if (x > Max.X) Max = new V2i(x, Max.Y);
+        if (y < Min.Y) Min = new V2i(Min.X, y);
+        if (y > Max.Y) Max = new V2i(Max.X, y);
+    }
+
+    /// <summary>Expands the box to include the given point.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Envelop(V2i p) => Envelop(p.X, p.Y);
+
+    /// <summary>Expands the box to include all given points.</summary>
+    public void Envelop(IReadOnlyList<V2i> points)
+    {
+        foreach (var p in points) Envelop(p.X, p.Y);
+    }
+
+    /// <summary>Expands the box to include all given points.</summary>
+    public void Envelop(ReadOnlySpan<V2i> points)
+    {
+        foreach (ref readonly var p in points) Envelop(p.X, p.Y);
+    }
+
+    /// <summary>Creates a box containing all the given points.</summary>
+    public static Box2i Of(IReadOnlyList<V2i> points)
+    {
+        var box = new Box2i();
+        box.Envelop(points);
+        return box;
+    }
+
+    /// <inheritdoc/>
+    public override readonly string ToString() => $"[{Min}, {Max}]";
+}
