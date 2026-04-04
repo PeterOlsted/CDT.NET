@@ -6,12 +6,52 @@ using System.Numerics;
 
 namespace CDT;
 
-#if NET7_0_OR_GREATER
-
 /// <summary>
 /// Topology verification utilities for debugging and testing.
 /// </summary>
-public static class TopologyVerifier
+public static partial class TopologyVerifier
+{
+    /// <summary>
+    /// Verifies the topological consistency of a <see cref="Triangulation"/> (integer).
+    /// Checks neighbor relationships and shared-edge consistency.
+    /// </summary>
+    /// <returns>true if topology is valid.</returns>
+    public static bool VerifyTopology(Triangulation cdt)
+    {
+        var triangles = cdt.Triangles.Span;
+        var vertices  = cdt.Vertices.Span;
+
+        for (int iT = 0; iT < triangles.Length; iT++)
+        {
+            var t = triangles[iT];
+            if (t.V0 == Indices.NoVertex || t.V1 == Indices.NoVertex || t.V2 == Indices.NoVertex)
+                return false;
+            if (t.V0 >= vertices.Length || t.V1 >= vertices.Length || t.V2 >= vertices.Length)
+                return false;
+            if (t.V0 == t.V1 || t.V1 == t.V2 || t.V0 == t.V2)
+                return false;
+
+            for (int i = 0; i < 3; i++)
+            {
+                int iN = t.GetNeighbor(i);
+                if (iN == Indices.NoNeighbor) continue;
+                if (iN >= triangles.Length) return false;
+                var tN = triangles[iN];
+                if (tN.N0 != iT && tN.N1 != iT && tN.N2 != iT)
+                    return false;
+                int va = t.GetVertex(i);
+                int vb = t.GetVertex(CdtUtils.Ccw(i));
+                if (!tN.ContainsVertex(va) || !tN.ContainsVertex(vb))
+                    return false;
+            }
+        }
+        return true;
+    }
+}
+
+#if NET7_0_OR_GREATER
+
+public static partial class TopologyVerifier
 {
     /// <summary>
     /// Verifies the topological consistency of a triangulation.

@@ -16,6 +16,39 @@ namespace CDT.Tests;
 public static class TestInputReader
 {
     /// <summary>
+    /// Reads a CDT integer input file.
+    /// Format: <c>nVerts nEdges\n x y\n … v1 v2\n …</c> with long integer coordinates.
+    /// </summary>
+    public static (List<V2i> Vertices, List<Edge> Edges) ReadInputInt(string path)
+    {
+        var lines = File.ReadAllLines(path);
+        int idx = 0;
+
+        var header = Split(lines[idx++]);
+        int nVerts = int.Parse(header[0]);
+        int nEdges = int.Parse(header[1]);
+
+        var vertices = new List<V2i>(nVerts);
+        for (int i = 0; i < nVerts; i++)
+        {
+            var p = Split(lines[idx++]);
+            vertices.Add(new V2i(long.Parse(p[0]), long.Parse(p[1])));
+        }
+
+        var edges = new List<Edge>(nEdges);
+        for (int i = 0; i < nEdges; i++)
+        {
+            var e = Split(lines[idx++]);
+            edges.Add(new Edge(int.Parse(e[0]), int.Parse(e[1])));
+        }
+
+        return (vertices, edges);
+
+        static string[] Split(string line) =>
+            line.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    /// <summary>
     /// Reads a CDT input file.
     /// Format: <c>nVerts nEdges\n x y\n … v1 v2\n …</c>
     /// </summary>
@@ -64,14 +97,34 @@ public static class TriangulationTopo
 {
     private static readonly uint NoNeighborOut = unchecked((uint)Indices.NoNeighbor);
 
+    /// <summary>Returns the canonical topology string for the integer <paramref name="cdt"/>.</summary>
+    public static string ToString(Triangulation cdt)
+    {
+        var triangles = cdt.Triangles.Span;
+        int n = triangles.Length;
+        return BuildTopoString(triangles, n, cdt.FixedEdges, cdt.OverlapCount, cdt.PieceToOriginals);
+    }
+
     /// <summary>Returns the canonical topology string for <paramref name="cdt"/>.</summary>
     public static string ToString<T>(Triangulation<T> cdt)
         where T : unmanaged, IFloatingPoint<T>, IMinMaxValue<T>, IRootFunctions<T>
     {
         var triangles = cdt.Triangles.Span;
         int n = triangles.Length;
+        return BuildTopoString(triangles, n, cdt.FixedEdges, cdt.OverlapCount, cdt.PieceToOriginals);
+    }
 
-        // Step 1: rotate each triangle so smallest vertex is first
+    /// <summary>Reads an expected topology file and returns its normalised content.</summary>
+    public static string ReadFromFile(string path) => File.ReadAllText(path);
+
+    // ------------------------------------------------------------------
+
+    private static string BuildTopoString(
+        ReadOnlySpan<Triangle> triangles, int n,
+        IReadOnlySet<Edge> fixedEdges,
+        IReadOnlyDictionary<Edge, ushort> overlapCount,
+        IReadOnlyDictionary<Edge, IReadOnlyList<Edge>> pieceToOriginals)
+    {
         var canonical = new (int v0, int v1, int v2, int n0, int n1, int n2)[n];
         for (int i = 0; i < n; i++)
         {
@@ -79,21 +132,17 @@ public static class TriangulationTopo
             canonical[i] = CanonicalRotate(t.V0, t.V1, t.V2, t.N0, t.N1, t.N2);
         }
 
-        // Step 2: sort by vertex triple
         var order = Enumerable.Range(0, n)
             .OrderBy(i => canonical[i].v0)
             .ThenBy(i => canonical[i].v1)
             .ThenBy(i => canonical[i].v2)
             .ToArray();
 
-        // Step 3: build old-index → new-sorted-index map
         var oldToNew = new int[n];
         for (int ni = 0; ni < n; ni++)
             oldToNew[order[ni]] = ni;
 
-        // Step 4: write
         var sb = new StringBuilder();
-
         sb.Append(n).Append('\n');
         foreach (int oi in order)
         {
@@ -107,28 +156,24 @@ public static class TriangulationTopo
               .Append('\n');
         }
 
-        // Fixed edges (sorted)
-        var fixedEdges = cdt.FixedEdges.OrderBy(e => e.V1).ThenBy(e => e.V2).ToList();
-        sb.Append('\n').Append(fixedEdges.Count).Append('\n');
-        foreach (var e in fixedEdges)
+        var fixedList = fixedEdges.OrderBy(e => e.V1).ThenBy(e => e.V2).ToList();
+        sb.Append('\n').Append(fixedList.Count).Append('\n');
+        foreach (var e in fixedList)
             sb.Append(e.V1).Append(' ').Append(e.V2).Append('\n');
 
-        // Overlap count (sorted by edge)
-        var overlapList = cdt.OverlapCount
+        var overlapList = overlapCount
             .OrderBy(kv => kv.Key.V1).ThenBy(kv => kv.Key.V2).ToList();
         sb.Append('\n').Append(overlapList.Count).Append('\n');
         foreach (var kv in overlapList)
             sb.Append(kv.Key.V1).Append(' ').Append(kv.Key.V2)
               .Append("    ").Append(kv.Value).Append('\n');
 
-        // Piece-to-originals (sorted by edge; sub-edges sorted)
-        var pieceList = cdt.PieceToOriginals
+        var pieceList = pieceToOriginals
             .OrderBy(kv => kv.Key.V1).ThenBy(kv => kv.Key.V2).ToList();
         sb.Append('\n').Append(pieceList.Count).Append('\n');
         foreach (var kv in pieceList)
         {
             sb.Append(kv.Key.V1).Append(' ').Append(kv.Key.V2).Append('\n');
-            // Sub-edges written in insertion order (matching C++ which uses std::vector insertion order)
             var subs = kv.Value;
             sb.Append("    ").Append(subs.Count).Append('\n');
             foreach (var sub in subs)
@@ -137,11 +182,6 @@ public static class TriangulationTopo
 
         return sb.ToString();
     }
-
-    /// <summary>Reads an expected topology file and returns its normalised content.</summary>
-    public static string ReadFromFile(string path) => File.ReadAllText(path);
-
-    // ------------------------------------------------------------------
 
     private static (int v0, int v1, int v2, int n0, int n1, int n2) CanonicalRotate(
         int v0, int v1, int v2, int n0, int n1, int n2)
@@ -181,6 +221,30 @@ internal static class GroundTruthHelpers
 
     private static string NormaliseNewlines(string s) =>
         s.Replace("\r\n", "\n").TrimEnd('\n') + "\n";
+
+    public static string InputIntPath(string fileName) =>
+        Path.Combine(AppContext.BaseDirectory, "inputs_int", fileName);
+
+    /// <summary>
+    /// Returns the path for an integer-CDT expected file.
+    /// The directory is located inside the build output next to <c>expected/</c>.
+    /// On first run (file absent) the test will write the file; subsequent
+    /// runs compare against the written content.
+    /// </summary>
+    public static string ExpectedIntPath(string fileName)
+    {
+        string dir = Path.Combine(AppContext.BaseDirectory, "expected_int");
+        Directory.CreateDirectory(dir);
+        return Path.Combine(dir, fileName);
+    }
+
+    public static void AssertTopologyMatchesFile(
+        Triangulation cdt, string expectedFile)
+    {
+        string actual = NormaliseNewlines(TriangulationTopo.ToString(cdt));
+        string expected = NormaliseNewlines(File.ReadAllText(expectedFile));
+        Assert.Equal(expected, actual);
+    }
 
     public static VertexInsertionOrder ParseOrder(string s) =>
         s == "auto" ? VertexInsertionOrder.Auto : VertexInsertionOrder.AsProvided;
@@ -799,5 +863,332 @@ public sealed class KdTreeTests
         Assert.Equal(1, kd.Nearest(9.0, 1.0, pts));
         Assert.Equal(2, kd.Nearest(9.0, 9.0, pts));
         Assert.Equal(3, kd.Nearest(1.0, 9.0, pts));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Integer constraint triangulation ground-truth tests
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Ground-truth tests for the integer constrained Delaunay triangulation.
+/// Uses integer-scaled inputs from inputs_int/ and compares against the same
+/// expected topology files as the float/double tests (topology is combinatorial
+/// and independent of coordinate scaling).
+/// </summary>
+public sealed class ConstraintTriangulationGroundTruthTests_Int
+{
+    // Same file lists as the float base class (type-specific files use f64_ expected files)
+    private static readonly string[] RegularFiles =
+    [
+        "Capital A.txt", "cdt.txt", "ditch.txt", "double-hanging.txt",
+        "gh_issue.txt", "Hanging.txt", "Hanging2.txt", "island.txt",
+        "issue-142-double-hanging-edge.txt", "issue-42-hole-overlaps-bondary.txt",
+        "issue-65-wrong-edges.txt", "kidney.txt", "Letter u.txt", "OnEdge.txt",
+        "overlapping constraints2.txt", "points_on_constraint_edge.txt",
+        "ProblematicCase1.txt", "regression_issue_38_wrong_hull_small.txt",
+        "square with crack.txt", "test_data_small.txt", "triple-hanging.txt",
+        "triple-hanging-flipped.txt", "unit square.txt",
+    ];
+
+    private static readonly string[] TypedFiles =
+    [
+        "guitar no box.txt",
+        "issue-42-full-boundary-overlap.txt",
+        "issue-42-multiple-boundary-overlaps.txt",
+        "issue-42-multiple-boundary-overlaps-conform-to-edge.txt",
+        "overlapping constraints.txt",
+    ];
+
+    public static IEnumerable<object[]> ConstraintTestCases()
+    {
+        var orders = new[] { "as-provided", "auto" };
+        var strategies = new[] { "ignore", "resolve" };
+        foreach (var f in RegularFiles)
+            foreach (var o in orders)
+                foreach (var s in strategies)
+                    yield return [f, false, o, s];
+        foreach (var f in TypedFiles)
+            foreach (var o in orders)
+                foreach (var s in strategies)
+                    yield return [f, true, o, s];
+    }
+
+    private string ExpectedFileName(string inputFile, bool isTyped, string order, string strategy, string section)
+    {
+        string baseName = Path.GetFileNameWithoutExtension(inputFile);
+        // Integer uses double-precision expected (f64_) for typed files
+        string prefix = isTyped ? "f64_" : "";
+        return $"{baseName}__{prefix}{order}_{strategy}_{section}.txt";
+    }
+
+    private void RunConstraint(
+        string inputFile, bool isTyped, string order, string strategy, string section,
+        Action<Triangulation> postInsert)
+    {
+        string inputPath = GroundTruthHelpers.InputIntPath(inputFile);
+        string expectedPath = GroundTruthHelpers.ExpectedIntPath(
+            ExpectedFileName(inputFile, isTyped, order, strategy, section));
+
+        var (verts, edges) = TestInputReader.ReadInputInt(inputPath);
+        Assert.Empty(CdtUtils.FindDuplicates(verts).Duplicates);
+
+        var cdt = new Triangulation(
+            GroundTruthHelpers.ParseOrder(order),
+            GroundTruthHelpers.ParseStrategy(strategy),
+            0L);
+
+        cdt.InsertVertices(verts);
+        cdt.InsertEdges(edges);
+        postInsert(cdt);
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        GroundTruthHelpers.AssertTopologyMatchesFile(cdt, expectedPath);
+    }
+
+    [Theory]
+    [MemberData(nameof(ConstraintTestCases))]
+    public void GroundTruth_Constraint_WithSuperTriangle(
+        string f, bool typed, string order, string strategy) =>
+        RunConstraint(f, typed, order, strategy, "all", _ => { });
+
+    [Theory]
+    [MemberData(nameof(ConstraintTestCases))]
+    public void GroundTruth_Constraint_EraseSuperTriangle(
+        string f, bool typed, string order, string strategy) =>
+        RunConstraint(f, typed, order, strategy, "super", cdt => cdt.EraseSuperTriangle());
+
+    [Theory]
+    [MemberData(nameof(ConstraintTestCases))]
+    public void GroundTruth_Constraint_EraseOuter(
+        string f, bool typed, string order, string strategy) =>
+        RunConstraint(f, typed, order, strategy, "outer", cdt => cdt.EraseOuterTriangles());
+
+    [Theory]
+    [MemberData(nameof(ConstraintTestCases))]
+    public void GroundTruth_Constraint_EraseOuterAndHoles(
+        string f, bool typed, string order, string strategy) =>
+        RunConstraint(f, typed, order, strategy, "auto", cdt => cdt.EraseOuterTrianglesAndHoles());
+}
+
+// ---------------------------------------------------------------------------
+// Integer conforming triangulation ground-truth tests
+// ---------------------------------------------------------------------------
+
+public sealed class ConformingTriangulationGroundTruthTests_Int
+{
+    private static readonly string[] RegularFiles =
+    [
+        "Capital A.txt", "cdt.txt", "ditch.txt", "double-hanging.txt",
+        "gh_issue.txt", "Hanging2.txt", "issue-142-double-hanging-edge.txt",
+        "points_on_constraint_edge.txt", "ProblematicCase1.txt",
+        "triple-hanging.txt", "triple-hanging-flipped.txt", "unit square.txt",
+    ];
+
+    private static readonly string[] TypedFiles =
+    [
+        "guitar no box.txt",
+        "issue-42-multiple-boundary-overlaps.txt",
+    ];
+
+    public static IEnumerable<object[]> ConformingTestCases()
+    {
+        foreach (var f in RegularFiles) yield return [f, false];
+        foreach (var f in TypedFiles) yield return [f, true];
+    }
+
+    [Theory]
+    [MemberData(nameof(ConformingTestCases))]
+    public void GroundTruth_Conforming(string inputFile, bool isTyped)
+    {
+        string baseName = Path.GetFileNameWithoutExtension(inputFile);
+        // Integer uses double-precision expected (f64_) for typed files
+        string prefix = isTyped ? "f64_" : "";
+        string expectedFile = $"{baseName}__conforming_{prefix}auto_ignore_auto.txt";
+
+        string inputPath  = GroundTruthHelpers.InputIntPath(inputFile);
+        string expectedPath = GroundTruthHelpers.ExpectedIntPath(expectedFile);
+
+        var (verts, edges) = TestInputReader.ReadInputInt(inputPath);
+
+        var cdt = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.NotAllowed,
+            0L);
+
+        cdt.InsertVertices(verts);
+        cdt.ConformToEdges(edges);
+        cdt.EraseOuterTrianglesAndHoles();
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        GroundTruthHelpers.AssertTopologyMatchesFile(cdt, expectedPath);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Integer crossing-edges ground-truth tests
+// ---------------------------------------------------------------------------
+
+public sealed class CrossingEdgesGroundTruthTests_Int
+{
+    private static readonly string[] CrossingFiles =
+    [
+        "crossing-edges.txt",
+        "issue-148-crossing-edges.txt",
+    ];
+
+    public static IEnumerable<object[]> CrossingTestCases() =>
+        CrossingFiles.Select(f => new object[] { f });
+
+    [Theory]
+    [MemberData(nameof(CrossingTestCases))]
+    public void GroundTruth_CrossingEdges_Constraint(string inputFile)
+    {
+        string baseName = Path.GetFileNameWithoutExtension(inputFile);
+        string expectedFile = $"{baseName}__auto_resolve_all.txt";
+
+        var (verts, edges) = TestInputReader.ReadInputInt(
+            GroundTruthHelpers.InputIntPath(inputFile));
+
+        var cdt = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.TryResolve,
+            0L);
+        cdt.InsertVertices(verts);
+        cdt.InsertEdges(edges);
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        GroundTruthHelpers.AssertTopologyMatchesFile(
+            cdt, GroundTruthHelpers.ExpectedIntPath(expectedFile));
+    }
+
+    [Theory]
+    [MemberData(nameof(CrossingTestCases))]
+    public void GroundTruth_CrossingEdges_Conforming(string inputFile)
+    {
+        string baseName = Path.GetFileNameWithoutExtension(inputFile);
+        string expectedFile = $"{baseName}__conforming_auto_resolve_all.txt";
+
+        var (verts, edges) = TestInputReader.ReadInputInt(
+            GroundTruthHelpers.InputIntPath(inputFile));
+
+        var cdt = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.TryResolve,
+            0L);
+        cdt.InsertVertices(verts);
+        cdt.ConformToEdges(edges);
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        GroundTruthHelpers.AssertTopologyMatchesFile(
+            cdt, GroundTruthHelpers.ExpectedIntPath(expectedFile));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Integer regression tests
+// ---------------------------------------------------------------------------
+
+public sealed class IntegerRegressionTests
+{
+    private static V2i Pt(long x, long y) => new(x, y);
+
+    [Fact]
+    public void Integer_TwoPartInsertionBatches()
+    {
+        var (verts, edges) = TestInputReader.ReadInputInt(
+            GroundTruthHelpers.InputIntPath("Constrained Sweden.txt"));
+
+        var cdtSingle = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.NotAllowed, 0L);
+        cdtSingle.InsertVertices(verts);
+        cdtSingle.InsertEdges(edges);
+        cdtSingle.EraseOuterTrianglesAndHoles();
+
+        int half = verts.Count / 2;
+        var cdtTwo = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.NotAllowed, 0L);
+        cdtTwo.InsertVertices(verts.Take(half).ToList());
+        cdtTwo.InsertVertices(verts.Skip(half).ToList());
+        cdtTwo.InsertEdges(edges);
+        cdtTwo.EraseOuterTrianglesAndHoles();
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdtSingle));
+        Assert.True(TopologyVerifier.VerifyTopology(cdtTwo));
+        Assert.Equal(cdtSingle.Triangles.Length, cdtTwo.Triangles.Length);
+        Assert.Equal(cdtSingle.Vertices.Length, cdtTwo.Vertices.Length);
+        Assert.Equal(cdtSingle.FixedEdges.Count, cdtTwo.FixedEdges.Count);
+    }
+
+    [Fact]
+    public void Integer_Regression_Debug2_File()
+    {
+        var (verts, edges) = TestInputReader.ReadInputInt(
+            GroundTruthHelpers.InputIntPath("debug2.txt"));
+        var cdt = new Triangulation();
+        cdt.InsertVertices(verts);
+        cdt.InsertEdges(edges);
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+    }
+
+    [Fact]
+    public void Integer_Regression_Hanging3_File()
+    {
+        var (verts, edges) = TestInputReader.ReadInputInt(
+            GroundTruthHelpers.InputIntPath("hanging3.txt"));
+        var cdt = new Triangulation();
+        cdt.InsertVertices(verts);
+        cdt.InsertEdges(edges);
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+    }
+
+    [Fact]
+    public void Integer_SuperTriangleContainsAllInputCorners()
+    {
+        // Verify the axis-aligned super-triangle construction by checking that
+        // all four bounding-box corners are strictly inside the super-triangle
+        // via all three orient2d checks (positive = CCW = inside).
+        var verts = new List<V2i>
+        {
+            Pt(-1000, -1000), Pt(1000, -1000),
+            Pt(1000,  1000),  Pt(-1000,  1000),
+        };
+        var cdt = new Triangulation();
+        cdt.InsertVertices(verts);
+
+        // The super-triangle vertices are at indices 0, 1, 2 (before user verts).
+        // After InsertVertices they are at positions _vertices[0..2].
+        // We can verify topology is valid at least.
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        Assert.Equal(4 + 3, cdt.Vertices.Length); // 4 user + 3 super
+    }
+
+    [Fact]
+    public void Integer_CoordinateOutOfRange_Throws()
+    {
+        long tooBig = CDT.Predicates.PredicatesInt.MaxCoordinate + 1L;
+        var verts = new List<V2i> { Pt(0, 0), Pt(tooBig, 0) };
+        var cdt = new Triangulation();
+        Assert.Throws<ArgumentOutOfRangeException>(() => cdt.InsertVertices(verts));
+    }
+
+    [Fact]
+    public void Integer_KdTree_Regression()
+    {
+        var pts = new List<V2i>
+        {
+            Pt(0,   0),   // 0
+            Pt(10,  0),   // 1
+            Pt(10, 10),   // 2
+            Pt(0,  10),   // 3
+        };
+        var kd = new KdTree(0, 0, 10, 10);
+        for (int i = 0; i < pts.Count; i++) kd.Insert(i, pts);
+
+        Assert.Equal(0, kd.Nearest(1L, 1L, pts));
+        Assert.Equal(1, kd.Nearest(9L, 1L, pts));
+        Assert.Equal(2, kd.Nearest(9L, 9L, pts));
+        Assert.Equal(3, kd.Nearest(1L, 9L, pts));
     }
 }

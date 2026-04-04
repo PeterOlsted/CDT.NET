@@ -20,14 +20,14 @@ namespace CDT.Predicates;
 /// contexts (Burst support for the polyfill path depends on Burst's approved
 /// type list at the time of adoption).
 /// </remarks>
-internal readonly struct Int128
+public readonly struct Int128
 {
     // _lo = bits 0–63, _hi = bits 64–127.  MSB of _hi is the sign bit.
     internal readonly ulong _lo;
     internal readonly ulong _hi;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal Int128(ulong lo, ulong hi) { _lo = lo; _hi = hi; }
+    public Int128(ulong lo, ulong hi) { _lo = lo; _hi = hi; }
 
     // -------------------------------------------------------------------------
     // Constants

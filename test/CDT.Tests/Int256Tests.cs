@@ -456,4 +456,152 @@ public sealed class Int256Tests
             expected == reconstructed,
             $"{label}: expected {expected}, got {reconstructed}");
     }
+
+    // -------------------------------------------------------------------------
+    // DivideToInt64
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void DivideToInt64_BothPositive()
+    {
+        // 15 / 4 → 4  (floor 3.75, round half-away = 4)
+        Assert.Equal(4L, Int256.DivideToInt64(I(15), (Int128)4));
+    }
+
+    [Fact]
+    public void DivideToInt64_NumeratorNegative()
+    {
+        // -15 / 4 → -4
+        Assert.Equal(-4L, Int256.DivideToInt64(I(-15), (Int128)4));
+    }
+
+    [Fact]
+    public void DivideToInt64_DenominatorNegative()
+    {
+        // 15 / -4 → -4
+        Assert.Equal(-4L, Int256.DivideToInt64(I(15), (Int128)(-4)));
+    }
+
+    [Fact]
+    public void DivideToInt64_BothNegative()
+    {
+        // -15 / -4 → 4
+        Assert.Equal(4L, Int256.DivideToInt64(I(-15), (Int128)(-4)));
+    }
+
+    [Fact]
+    public void DivideToInt64_ExactDivision()
+    {
+        // 12 / 4 = 3 exactly
+        Assert.Equal(3L, Int256.DivideToInt64(I(12), (Int128)4));
+    }
+
+    [Fact]
+    public void DivideToInt64_NumeratorZero()
+    {
+        Assert.Equal(0L, Int256.DivideToInt64(Int256.Zero, (Int128)7));
+        Assert.Equal(0L, Int256.DivideToInt64(Int256.Zero, (Int128)(-7)));
+    }
+
+    [Fact]
+    public void DivideToInt64_DenominatorOne()
+    {
+        Assert.Equal(42L, Int256.DivideToInt64(I(42), (Int128)1));
+        Assert.Equal(-42L, Int256.DivideToInt64(I(-42), (Int128)1));
+    }
+
+    [Fact]
+    public void DivideToInt64_DenominatorMinusOne()
+    {
+        Assert.Equal(-42L, Int256.DivideToInt64(I(42), (Int128)(-1)));
+        Assert.Equal(42L, Int256.DivideToInt64(I(-42), (Int128)(-1)));
+    }
+
+    [Fact]
+    public void DivideToInt64_RoundingHalfUp_Positive()
+    {
+        // 5 / 2 = 2.5 → rounds to 3 (half-away-from-zero)
+        Assert.Equal(3L, Int256.DivideToInt64(I(5), (Int128)2));
+    }
+
+    [Fact]
+    public void DivideToInt64_RoundingHalfUp_Negative()
+    {
+        // -5 / 2 = -2.5 → rounds to -3 (half-away-from-zero)
+        Assert.Equal(-3L, Int256.DivideToInt64(I(-5), (Int128)2));
+    }
+
+    [Fact]
+    public void DivideToInt64_Rounding_BelowHalf()
+    {
+        // 7 / 4 = 1.75 → rounds to 2
+        Assert.Equal(2L, Int256.DivideToInt64(I(7), (Int128)4));
+        // 5 / 4 = 1.25 → rounds to 1
+        Assert.Equal(1L, Int256.DivideToInt64(I(5), (Int128)4));
+    }
+
+    [Fact]
+    public void DivideToInt64_LargeValues_AgainstBigInteger()
+    {
+        // num ≈ 2^163, den ≈ 2^110, quotient ≈ 2^53
+        // Build numerator as Int256 via Multiply
+        Int128 a = (Int128)1 << 81;   // 2^81
+        Int128 b = (Int128)1 << 82;   // 2^82
+        Int256 num = Int256.Multiply(a, b); // exact product = 2^163
+
+        Int128 den = (Int128)1 << 110; // 2^110
+        long quotient = Int256.DivideToInt64(num, den);
+
+        // 2^163 / 2^110 = 2^53 exactly
+        Assert.Equal(1L << 53, quotient);
+    }
+
+    [Fact]
+    public void DivideToInt64_LargeValues_WithRemainder_AgainstBigInteger()
+    {
+        // Use BigInteger as oracle for a non-divisible large case
+        long aRaw  = PredicatesInt.MaxCoordinate;     // 2^53
+        long bRaw  = aRaw - 1;
+        long cRaw  = -(aRaw - 2);
+        long dRaw  = aRaw - 3;
+
+        // Orient2dRaw returns at most magnitude ~2^109 for MaxCoordinate inputs
+        Int128 acd = PredicatesInt.Orient2dRaw(
+            new V2i(aRaw, 0), new V2i(cRaw, 0), new V2i(0, dRaw));
+        Int128 bcd = PredicatesInt.Orient2dRaw(
+            new V2i(bRaw, 0), new V2i(cRaw, 0), new V2i(0, dRaw));
+        Int128 denom = acd - bcd;
+        if (denom == Int128.Zero) return; // degenerate input, skip
+
+        long delta = bRaw - aRaw; // = -1
+        Int256 numX = Int256.Multiply(acd, (Int128)delta);
+
+        long result = Int256.DivideToInt64(numX, denom);
+
+        // Verify against BigInteger
+        var bigAcd  = ToBig128(acd);
+        var bigDen  = ToBig128(denom);
+        var bigNumX = bigAcd * (System.Numerics.BigInteger)delta;
+        var bigQ    = System.Numerics.BigInteger.DivRem(bigNumX, bigDen, out var bigR);
+        // Round half-away-from-zero
+        if (2 * System.Numerics.BigInteger.Abs(bigR) >= System.Numerics.BigInteger.Abs(bigDen))
+            bigQ += bigQ < 0 ? -1 : 1;
+
+        Assert.True(bigQ == (System.Numerics.BigInteger)result,
+            $"expected {bigQ}, got {result}");
+    }
+
+    // Helper: Int128 → BigInteger
+    private static System.Numerics.BigInteger ToBig128(Int128 v)
+    {
+#if NET7_0_OR_GREATER
+        return (System.Numerics.BigInteger)v;
+#else
+        bool neg = v < Int128.Zero;
+        Int128 abs = neg ? -v : v;
+        var result = (new System.Numerics.BigInteger((long)abs._hi) << 64)
+                   | new System.Numerics.BigInteger(abs._lo);
+        return neg ? -result : result;
+#endif
+    }
 }

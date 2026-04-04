@@ -249,6 +249,86 @@ internal readonly struct Int256
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Int256 operator -(Int256 a) => Negate(a);
 
+    // -------------------------------------------------------------------------
+    // Division: Int256 / Int128 → long  (round-half-away-from-zero)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Divides <paramref name="numerator"/> by <paramref name="denominator"/> and
+    /// returns the result rounded half-away-from-zero as a <see cref="long"/>.
+    /// </summary>
+    /// <remarks>
+    /// Preconditions enforced with <see cref="System.Diagnostics.Debug.Assert"/>:
+    /// <list type="bullet">
+    ///   <item><paramref name="denominator"/> ≠ 0.</item>
+    ///   <item>The exact quotient fits in <see cref="long"/>
+    ///         (i.e. |result| ≤ 2^53 = <c>MaxCoordinate</c>).</item>
+    /// </list>
+    /// Used by <c>IntersectionPosition</c>; CDT geometry guarantees both
+    /// preconditions hold (see PLAN.md bit-width analysis).
+    /// </remarks>
+    public static long DivideToInt64(Int256 numerator, Int128 denominator)
+    {
+        System.Diagnostics.Debug.Assert(denominator != Int128.Zero, "denominator must not be zero");
+
+        int numSign = numerator.Sign();
+        if (numSign == 0) return 0L;
+
+        bool negative = (numSign < 0) ^ (denominator < Int128.Zero);
+
+        Int256 absNum    = numSign < 0 ? Negate(numerator) : numerator;
+        Int128 absDen128 = denominator < Int128.Zero ? -denominator : denominator;
+        Int256 absDen    = FromInt128(absDen128);
+
+        // Binary long division.  |quotient| ≤ 2^53, so 54 iterations suffice.
+        ulong  q   = 0;
+        Int256 rem = absNum;
+        for (int bit = 53; bit >= 0; bit--)
+        {
+            Int256 shifted = bit == 0 ? absDen : ShiftLeftUnsigned(absDen, bit);
+            if (CompareUnsigned(rem, shifted) >= 0)
+            {
+                rem  = Subtract(rem, shifted);
+                q   |= 1UL << bit;
+            }
+        }
+
+        // Round half-away-from-zero: if 2*rem ≥ absDen, increment quotient.
+        if (CompareUnsigned(Add(rem, rem), absDen) >= 0)
+            q++;
+
+        System.Diagnostics.Debug.Assert(q <= (ulong)long.MaxValue, "quotient does not fit in long");
+        return negative ? -(long)q : (long)q;
+    }
+
+    /// <summary>
+    /// Left-shifts a non-negative <see cref="Int256"/> by <paramref name="k"/> bits (1 ≤ k ≤ 63).
+    /// No overflow checking — caller must ensure the result fits.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Int256 ShiftLeftUnsigned(Int256 a, int k)
+    {
+        int rk = 64 - k;
+        return new Int256(
+             a.Lo << k,
+            (a.M1 << k) | (a.Lo >> rk),
+            (a.M2 << k) | (a.M1 >> rk),
+            (a.Hi << k) | (a.M2 >> rk));
+    }
+
+    /// <summary>
+    /// Unsigned comparison of two <see cref="Int256"/> values.
+    /// Returns −1, 0, or +1.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int CompareUnsigned(Int256 a, Int256 b)
+    {
+        if (a.Hi != b.Hi) return a.Hi < b.Hi ? -1 : 1;
+        if (a.M2 != b.M2) return a.M2 < b.M2 ? -1 : 1;
+        if (a.M1 != b.M1) return a.M1 < b.M1 ? -1 : 1;
+        return a.Lo < b.Lo ? -1 : a.Lo > b.Lo ? 1 : 0;
+    }
+
     /// <inheritdoc/>
     public override string ToString() =>
         $"Int256(Hi=0x{Hi:X16} M2=0x{M2:X16} M1=0x{M1:X16} Lo=0x{Lo:X16})";
