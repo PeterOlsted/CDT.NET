@@ -6,6 +6,8 @@ using System.Numerics;
 
 namespace CDT;
 
+#if NET7_0_OR_GREATER
+
 /// <summary>
 /// Topology verification utilities for debugging and testing.
 /// </summary>
@@ -54,4 +56,6 @@ public static class TopologyVerifier
         return true;
     }
 }
+
+#endif // NET7_0_OR_GREATER
 

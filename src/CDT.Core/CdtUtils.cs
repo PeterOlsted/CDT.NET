@@ -9,6 +9,8 @@ using CDT.Predicates;
 
 namespace CDT;
 
+#if NET7_0_OR_GREATER
+
 /// <summary>
 /// Duplicates information for vertex deduplication.
 /// </summary>
@@ -614,3 +616,5 @@ public static class CdtUtils
         return false;
     }
 }
+
+#endif // NET7_0_OR_GREATER

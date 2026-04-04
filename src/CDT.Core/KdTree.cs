@@ -7,8 +7,11 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using CDT.Predicates;
 
 namespace CDT;
+
+#if NET7_0_OR_GREATER
 
 /// <summary>
 /// Incrementally-built 2D KD-tree for nearest-point queries.
@@ -335,9 +338,11 @@ internal sealed class KdTree<T>
     }
 }
 
+#endif // NET7_0_OR_GREATER
+
 /// <summary>
 /// Incrementally-built 2D KD-tree for nearest-point queries using exact
-/// 64-bit integer coordinates. Replaces <see cref="KdTree{T}"/> for the
+/// 64-bit integer coordinates. Replaces the generic KdTree&lt;T&gt; for the
 /// deterministic integer triangulation path.
 /// Distance comparisons use <see cref="Int128"/> squared distances —
 /// no square root, no floating-point.

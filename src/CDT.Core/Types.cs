@@ -7,6 +7,8 @@ using System.Runtime.CompilerServices;
 
 namespace CDT;
 
+#if NET7_0_OR_GREATER
+
 /// <summary>2D vector / point with X and Y coordinates.</summary>
 /// <typeparam name="T">Floating-point coordinate type.</typeparam>
 public readonly struct V2d<T>
@@ -106,6 +108,8 @@ public struct Box2d<T>
     /// <inheritdoc/>
     public override readonly string ToString() => $"[{Min}, {Max}]";
 }
+
+#endif // NET7_0_OR_GREATER
 
 /// <summary>
 /// Undirected edge connecting two vertices. The vertex with the smaller index

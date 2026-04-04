@@ -4,9 +4,11 @@
 
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using static CDT.CdtUtils;
 
 namespace CDT;
+
+#if NET7_0_OR_GREATER
+using static CDT.CdtUtils;
 
 /// <summary>
 /// Errors thrown by the triangulation.
@@ -1624,3 +1626,5 @@ internal sealed class CovariantReadOnlyDictionary<TKey, TInner, TOuter>(Dictiona
         inner.Select(kv => new KeyValuePair<TKey, TOuter>(kv.Key, kv.Value)).GetEnumerator();
     System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
+
+#endif // NET7_0_OR_GREATER

@@ -615,6 +615,7 @@ public static class PredicatesAdaptive
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static double Estimate(Span<double> e, int elen)
     {
+#if NET7_0_OR_GREATER
         if (Vector256.IsHardwareAccelerated && elen >= 4)
         {
             ref double eRef = ref MemoryMarshal.GetReference(e);
@@ -627,6 +628,7 @@ public static class PredicatesAdaptive
             for (; i < elen; i++) sum += Unsafe.Add(ref eRef, i);
             return sum;
         }
+#endif
 
         // opt-13: bounds-check-free scalar loop
         ref double sRef = ref MemoryMarshal.GetReference(e);
@@ -648,6 +650,7 @@ public static class PredicatesAdaptive
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]  // opt-14
     internal static void NegateInto(Span<double> src, int len, Span<double> dst)
     {
+#if NET7_0_OR_GREATER
         if (Vector256.IsHardwareAccelerated && len >= 4)
         {
             ref double srcRef = ref MemoryMarshal.GetReference(src);
@@ -659,6 +662,7 @@ public static class PredicatesAdaptive
             for (; i < len; i++) dst[i] = -src[i];
             return;
         }
+#endif
 
         for (int i = 0; i < len; i++) { dst[i] = -src[i]; }
     }

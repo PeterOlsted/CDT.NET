@@ -42,8 +42,13 @@ internal readonly struct Int256
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Int256 FromInt128(Int128 value)
     {
+#if NET7_0_OR_GREATER
         ulong lo = (ulong)value;
         ulong m1 = (ulong)((UInt128)value >> 64);
+#else
+        ulong lo = value._lo;
+        ulong m1 = value._hi;
+#endif
         // Sign-extend: if negative fill upper limbs with 0xFFFF…, else 0.
         ulong ext = value < Int128.Zero ? ulong.MaxValue : 0UL;
         return new Int256(lo, m1, ext, ext);
@@ -135,10 +140,15 @@ internal readonly struct Int256
         // Record sign, then work with unsigned magnitudes.
         bool negative = (a < Int128.Zero) != (b < Int128.Zero);
 
+#if NET7_0_OR_GREATER
         UInt128 ua = a < Int128.Zero ? (UInt128)(-a) : (UInt128)a;
         UInt128 ub = b < Int128.Zero ? (UInt128)(-b) : (UInt128)b;
-
         Int256 product = MultiplyUnsigned128(ua, ub);
+#else
+        Int128 ua = a < Int128.Zero ? -a : a;
+        Int128 ub = b < Int128.Zero ? -b : b;
+        Int256 product = MultiplyUnsigned128(ua._lo, ua._hi, ub._lo, ub._hi);
+#endif
         return negative ? Negate(product) : product;
     }
 
@@ -147,6 +157,7 @@ internal readonly struct Int256
     /// Splits each operand into two 64-bit halves and accumulates four
     /// 64×64 partial products, propagating carries exactly.
     /// </summary>
+#if NET7_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static Int256 MultiplyUnsigned128(UInt128 a, UInt128 b)
     {
@@ -177,6 +188,53 @@ internal readonly struct Int256
 
         return new Int256(r0, r1, r2, r3);
     }
+#else
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Int256 MultiplyUnsigned128(ulong aLo, ulong aHi, ulong bLo, ulong bHi)
+    {
+        // Four 64×64 partial products; MulHi gives the high 64 bits of each.
+        ulong p0Lo = aLo * bLo;  ulong p0Hi = MulHi(aLo, bLo);
+        ulong p1Lo = aLo * bHi;  ulong p1Hi = MulHi(aLo, bHi);
+        ulong p2Lo = aHi * bLo;  ulong p2Hi = MulHi(aHi, bLo);
+        ulong p3Lo = aHi * bHi;  ulong p3Hi = MulHi(aHi, bHi);
+
+        ulong r0 = p0Lo;
+
+        // Accumulate bits 64–127.
+        ulong r1 = p0Hi;
+        ulong c1 = 0UL;
+        ulong t  = r1 + p1Lo; if (t < r1) c1++; r1 = t;
+        t         = r1 + p2Lo; if (t < r1) c1++; r1 = t;
+
+        // Accumulate bits 128–191.
+        ulong r2 = c1;
+        ulong c2 = 0UL;
+        t = r2 + p1Hi; if (t < r2) c2++; r2 = t;
+        t = r2 + p2Hi; if (t < r2) c2++; r2 = t;
+        t = r2 + p3Lo; if (t < r2) c2++; r2 = t;
+
+        // Bits 192–255.
+        ulong r3 = p3Hi + c2;
+
+        return new Int256(r0, r1, r2, r3);
+    }
+
+    /// <summary>
+    /// High 64 bits of the unsigned product <paramref name="a"/> × <paramref name="b"/>.
+    /// Equivalent to <see cref="Int128.MulHi"/> — duplicated here to keep Int256 self-contained.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong MulHi(ulong a, ulong b)
+    {
+        ulong aLo = (uint)a, aHi = a >> 32;
+        ulong bLo = (uint)b, bHi = b >> 32;
+        ulong p   = aLo * bLo;
+        ulong t   = aHi * bLo + (p >> 32);
+        ulong tLo = (uint)t, tHi = t >> 32;
+        t = aLo * bHi + tLo;
+        return aHi * bHi + tHi + (t >> 32);
+    }
+#endif
 
     // -------------------------------------------------------------------------
     // Operators (convenience wrappers used by predicate code)
