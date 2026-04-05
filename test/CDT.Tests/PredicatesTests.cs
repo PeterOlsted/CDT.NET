@@ -48,6 +48,7 @@ public sealed class PredicatesTests
     }
 }
 
+#if NET7_0_OR_GREATER
 /// <summary>Tests for triangle utils.</summary>
 public sealed class TriangleUtilsTests
 {
@@ -115,6 +116,7 @@ public sealed class TriangleUtilsTests
         Assert.Equal(25.0, CdtUtils.DistanceSquared(a, b), 12);
     }
 }
+#endif
 
 /// <summary>Tests for edge type.</summary>
 public sealed class EdgeTests

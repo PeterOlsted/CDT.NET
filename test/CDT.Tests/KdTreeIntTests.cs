@@ -4,6 +4,10 @@
 
 namespace CDT.Tests;
 
+#if !NET7_0_OR_GREATER
+using CDT.Predicates; // Int128 polyfill on .NET 6
+#endif
+
 /// <summary>
 /// Tests for the integer <see cref="KdTree"/> (concrete, long-coordinate variant).
 /// </summary>

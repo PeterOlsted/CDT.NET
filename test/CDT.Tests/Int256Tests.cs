@@ -24,6 +24,14 @@ public sealed class Int256Tests
     /// <summary>Small positive Int256 from a long.</summary>
     private static Int256 I(long v) => Int256.FromInt128(v);
 
+    /// <summary>Returns 2^n as <see cref="Int128"/> via repeated doubling (avoids &lt;&lt; on the polyfill type).</summary>
+    private static Int128 Pow2_128(int n)
+    {
+        Int128 r = (Int128)1L;
+        for (int i = 0; i < n; i++) r = r + r;
+        return r;
+    }
+
     // -------------------------------------------------------------------------
     // FromInt128 / sign extension
     // -------------------------------------------------------------------------
@@ -333,7 +341,7 @@ public sealed class Int256Tests
         foreach (var (a, b) in cases)
         {
             var result = Int256.Multiply(a, b);
-            var expected = (System.Numerics.BigInteger)a * (System.Numerics.BigInteger)b;
+            var expected = ToBig128(a) * ToBig128(b);
 
             // Compare signs
             int expectedSign = expected.Sign;
@@ -545,11 +553,12 @@ public sealed class Int256Tests
     {
         // num ≈ 2^163, den ≈ 2^110, quotient ≈ 2^53
         // Build numerator as Int256 via Multiply
-        Int128 a = (Int128)1 << 81;   // 2^81
-        Int128 b = (Int128)1 << 82;   // 2^82
+        // Use Pow2_128 helper since the custom Int128 polyfill has no << operator.
+        Int128 a = Pow2_128(81);   // 2^81
+        Int128 b = Pow2_128(82);   // 2^82
         Int256 num = Int256.Multiply(a, b); // exact product = 2^163
 
-        Int128 den = (Int128)1 << 110; // 2^110
+        Int128 den = Pow2_128(110); // 2^110
         long quotient = Int256.DivideToInt64(num, den);
 
         // 2^163 / 2^110 = 2^53 exactly

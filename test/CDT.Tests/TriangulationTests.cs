@@ -4,6 +4,7 @@
 
 namespace CDT.Tests;
 
+#if NET7_0_OR_GREATER
 /// <summary>Basic triangulation tests (float and double).</summary>
 public abstract class TriangulationTestsBase<T>
     where T : unmanaged,
@@ -304,6 +305,8 @@ public sealed class TriangulationTests_Double : TriangulationTestsBase<double> {
 
 /// <summary>Triangulation tests for <see cref="float"/>.</summary>
 public sealed class TriangulationTests_Float : TriangulationTestsBase<float> { }
+
+#endif
 
 // ---------------------------------------------------------------------------
 // Concrete integer triangulation tests (no generics, V2i coordinates)

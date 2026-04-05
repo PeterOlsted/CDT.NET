@@ -34,7 +34,11 @@ public readonly struct Int128
     // -------------------------------------------------------------------------
 
     /// <summary>0.</summary>
-    public static readonly Int128 Zero     = new Int128(0UL, 0UL);
+    public static readonly Int128 Zero        = new Int128(0UL, 0UL);
+    /// <summary>1.</summary>
+    public static readonly Int128 One         = new Int128(1UL, 0UL);
+    /// <summary>-1.</summary>
+    public static readonly Int128 NegativeOne = new Int128(ulong.MaxValue, ulong.MaxValue);
 
     /// <summary>2^127 − 1  (maximum positive value).</summary>
     public static readonly Int128 MaxValue = new Int128(ulong.MaxValue, (ulong)long.MaxValue);

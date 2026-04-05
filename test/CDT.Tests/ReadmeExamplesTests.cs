@@ -4,6 +4,7 @@
 
 namespace CDT.Tests;
 
+#if NET7_0_OR_GREATER
 /// <summary>Validates that the README code examples compile and produce the expected results.</summary>
 public sealed class ReadmeExamplesTests
 {
@@ -200,6 +201,9 @@ public sealed class ReadmeExamplesTests
         Assert.True(cdt.Vertices.Length > 4);
     }
 }
+
+/// <summary>
+#endif
 
 /// <summary>
 /// Validates the README code examples with the integer <see cref="Triangulation"/>

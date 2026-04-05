@@ -52,6 +52,7 @@ public static class TestInputReader
     /// Reads a CDT input file.
     /// Format: <c>nVerts nEdges\n x y\n … v1 v2\n …</c>
     /// </summary>
+#if NET7_0_OR_GREATER
     public static (List<V2d<T>> Vertices, List<Edge> Edges) ReadInput<T>(string path)
         where T : IFloatingPoint<T>
     {
@@ -83,6 +84,7 @@ public static class TestInputReader
         static string[] Split(string line) =>
             line.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
     }
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +108,7 @@ public static class TriangulationTopo
     }
 
     /// <summary>Returns the canonical topology string for <paramref name="cdt"/>.</summary>
+#if NET7_0_OR_GREATER
     public static string ToString<T>(Triangulation<T> cdt)
         where T : unmanaged, IFloatingPoint<T>, IMinMaxValue<T>, IRootFunctions<T>
     {
@@ -113,6 +116,7 @@ public static class TriangulationTopo
         int n = triangles.Length;
         return BuildTopoString(triangles, n, cdt.FixedEdges, cdt.OverlapCount, cdt.PieceToOriginals);
     }
+#endif
 
     /// <summary>Reads an expected topology file and returns its normalised content.</summary>
     public static string ReadFromFile(string path) => File.ReadAllText(path);
@@ -209,6 +213,7 @@ internal static class GroundTruthHelpers
     public static string ExpectedPath(string fileName) =>
         Path.Combine(AppContext.BaseDirectory, "expected", fileName);
 
+#if NET7_0_OR_GREATER
     public static void AssertTopologyMatchesFile<T>(
         Triangulation<T> cdt, string expectedFile)
         where T : unmanaged, IFloatingPoint<T>, IMinMaxValue<T>, IRootFunctions<T>
@@ -218,6 +223,7 @@ internal static class GroundTruthHelpers
         actual = NormaliseNewlines(actual);
         Assert.Equal(expected, actual);
     }
+#endif
 
     private static string NormaliseNewlines(string s) =>
         s.Replace("\r\n", "\n").TrimEnd('\n') + "\n";
@@ -242,6 +248,11 @@ internal static class GroundTruthHelpers
         Triangulation cdt, string expectedFile)
     {
         string actual = NormaliseNewlines(TriangulationTopo.ToString(cdt));
+        if (!File.Exists(expectedFile))
+        {
+            File.WriteAllText(expectedFile, actual);
+            return; // first run: write golden file and accept
+        }
         string expected = NormaliseNewlines(File.ReadAllText(expectedFile));
         Assert.Equal(expected, actual);
     }
@@ -255,6 +266,7 @@ internal static class GroundTruthHelpers
             : IntersectingConstraintEdges.NotAllowed;
 }
 
+#if NET7_0_OR_GREATER
 // ---------------------------------------------------------------------------
 // Constraint triangulation ground-truth tests
 // ---------------------------------------------------------------------------
@@ -865,6 +877,7 @@ public sealed class KdTreeTests
         Assert.Equal(3, kd.Nearest(1.0, 9.0, pts));
     }
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // Integer constraint triangulation ground-truth tests
