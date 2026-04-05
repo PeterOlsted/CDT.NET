@@ -133,18 +133,28 @@ public sealed class Triangulation
     public ReadOnlyMemory<Triangle> Triangles => new(_triangles, 0, _trianglesCount);
 
     /// <summary>Set of constraint (fixed) edges.</summary>
+    /// <remarks>Backed by a <see cref="System.Collections.Generic.HashSet{T}"/>.
+    /// Iteration order is not deterministic and must not be relied upon.
+    /// Use <c>Contains</c> for membership tests.</remarks>
     public IReadOnlySet<Edge> FixedEdges => _fixedEdges;
 
     /// <summary>
     /// Stores count of overlapping boundaries for a fixed edge.
     /// Only has entries for edges that represent overlapping boundaries.
     /// </summary>
+    /// <remarks>Backed by a <see cref="System.Collections.Generic.Dictionary{TKey,TValue}"/>.
+    /// Iteration order is not deterministic.</remarks>
     public IReadOnlyDictionary<Edge, ushort> OverlapCount => _overlapCount;
 
     /// <summary>
     /// Stores the list of original edges represented by a given fixed edge.
     /// Only populated when edges were split or overlap.
     /// </summary>
+    /// <remarks>Backed by a <see cref="System.Collections.Generic.Dictionary{TKey,TValue}"/>.
+    /// Iteration order is not deterministic. The triangulation output (vertex and triangle
+    /// arrays) is fully deterministic regardless of the order these dictionaries are iterated
+    /// internally — all algorithmic decisions use <c>Contains</c>/<c>TryGetValue</c> lookups,
+    /// not enumeration.</remarks>
     public IReadOnlyDictionary<Edge, IReadOnlyList<Edge>> PieceToOriginals => _pieceToOriginalsView;
 
     // -------------------------------------------------------------------------
@@ -191,19 +201,28 @@ public sealed class Triangulation
     { }
 
     /// <summary>Creates a triangulation with explicit settings.</summary>
+    /// <param name="insertionOrder">Order in which vertices are inserted.</param>
+    /// <param name="intersectingEdgesStrategy">How to handle intersecting constraint edges.</param>
     /// <param name="snapTolerance">
     /// Area-units snap tolerance for constraint-edge processing.
     /// A point whose <c>|Orient2dRaw|</c> ≤ this value is considered on the line.
     /// Default is 0 (exact arithmetic, no snapping).
     /// </param>
+    /// <param name="randomSeed">
+    /// Seed for the Fisher-Yates shuffle used when <paramref name="insertionOrder"/> is
+    /// <see cref="VertexInsertionOrder.Auto"/>. The default value of <c>0</c> produces
+    /// fully deterministic output. Pass different seeds to explore alternative orderings.
+    /// </param>
     public Triangulation(
         VertexInsertionOrder insertionOrder,
         IntersectingConstraintEdges intersectingEdgesStrategy,
-        long snapTolerance = 0L)
+        long snapTolerance = 0L,
+        int randomSeed = 0)
     {
         _insertionOrder = insertionOrder;
         _intersectingEdgesStrategy = intersectingEdgesStrategy;
         _snapTolerance = snapTolerance;
+        _rng = new Random(randomSeed);
         _superGeomType = SuperGeometryType.SuperTriangle;
         _nTargetVerts = 0;
         _pieceToOriginalsView = new CovariantReadOnlyDictionary<Edge, List<Edge>, IReadOnlyList<Edge>>(_pieceToOriginals);
@@ -514,7 +533,7 @@ public sealed class Triangulation
         foreach (int iV in indices) { InsertVertex(iV, stack); }
     }
 
-    private static readonly Random _rng = new();
+    private readonly Random _rng;
 
     private void InsertVertices_KDTreeBFS(int superGeomVertCount, Box2i box)
     {
