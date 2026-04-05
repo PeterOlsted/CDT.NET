@@ -1,35 +1,54 @@
 # CDT.NET
 
-[![Build](https://github.com/MichaCo/CDT.NET/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/MichaCo/CDT.NET/actions/workflows/ci-cd.yml)
+[![Build](https://github.com/PeterOlsted/CDT.NET/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/PeterOlsted/CDT.NET/actions/workflows/ci-cd.yml)
 [![NuGet](https://img.shields.io/nuget/v/CDT.NET.svg)](https://www.nuget.org/packages/CDT.NET)
 
-A C# port of the [artem-ogre/CDT](https://github.com/artem-ogre/CDT) Constrained Delaunay Triangulation library.
+**Deterministic Constrained Delaunay Triangulation for Unity and .NET.**
 
-> **Credits:** This library is a C# port of the excellent [CDT C++ library](https://github.com/artem-ogre/CDT) by Artem Amirkhanov and contributors, licensed under MPL 2.0.
-> For full algorithm documentation, research references, and in-depth API documentation please refer to the [original C++ repository](https://github.com/artem-ogre/CDT) and its [online documentation](https://artem-ogre.github.io/CDT/).
+A C# port of [artem-ogre/CDT](https://github.com/artem-ogre/CDT), converted to exact integer arithmetic for bit-reproducible results across platforms — designed for use in Unity (including Burst-compatible pipelines) and any .NET 5+ environment.
 
-## What is CDT?
+> **Credits:** Based on the [CDT C++ library](https://github.com/artem-ogre/CDT) by Artem Amirkhanov and contributors (MPL-2.0).
+> Algorithm documentation and research references: [original C++ repository](https://github.com/artem-ogre/CDT) and its [online docs](https://artem-ogre.github.io/CDT/).
 
-CDT is a library for generating **Constrained** and **Conforming** Delaunay Triangulations. It produces triangulations from a set of points and optional boundary/constraint edges. Unlike a plain Delaunay triangulation, CDT guarantees that the constraint edges you specify will appear in the final mesh.
+---
+
+## Why this fork?
+
+The upstream C++ CDT library uses floating-point predicates (Shewchuk adaptive arithmetic). For game engines and simulation code that requires **deterministic, platform-independent results**, floating-point is insufficient — the same input can produce different triangulations on different CPUs, compilers, or runtimes.
+
+This fork replaces all floating-point arithmetic with **exact integer predicates**:
+
+- All coordinates are `long` (`V2i`), quantised to a fixed integer grid
+- Orient2d and InCircle predicates use `Int128` / `Int256` intermediates — no rounding, no adaptive fallback
+- `IntersectionPosition` uses 256-bit exact arithmetic with round-half-away-from-zero snapping
+- Zero `float` or `double` in the core algorithm — results are identical on every platform
+
+**Unity compatibility:** `System.Int128` / `System.UInt128` are unavailable before Unity 6.8 (.NET 8 BCL). CDT.NET ships a minimal `Int128` polyfill gated behind `#if !NET7_0_OR_GREATER`, and rewrites `Int256` multiplication to avoid `UInt128` entirely using 32-bit schoolbook arithmetic. The `net5.0` build target is verified to compile and run correctly on the current Unity runtime.
+
+---
 
 ## Features
 
 - **Constrained Delaunay Triangulation** — force specific edges into the triangulation
-- **Conforming Delaunay Triangulation** — split edges and add Steiner points until constraint edges are present in the triangulation
-- **Convex-hull** triangulation — triangulate all points without any constraints
-- **Automatic hole detection** — use `EraseOuterTrianglesAndHoles` to remove outer regions and holes based on even–odd winding depth
-- **Robust geometric predicates** — numerically stable orientation and in-circle tests
-- **KD-tree spatial indexing** — fast nearest-neighbor lookup during vertex insertion
-- **Duplicate handling** — utilities to remove duplicate vertices and remap edges before triangulation
-- **Intersecting constraint edges** — optionally resolve by splitting edges at the intersection point
-- Multi-target: **.NET 8** and **.NET 10**
+- **Conforming Delaunay Triangulation** — split edges and insert Steiner points until constraints are represented
+- **Convex-hull triangulation** — triangulate all points with no constraints
+- **Automatic hole detection** — `EraseOuterTrianglesAndHoles` removes outer regions and holes by even-odd winding depth
+- **Exact integer predicates** — Orient2d and InCircle with Int128/Int256 intermediates, bit-identical on all platforms
+- **Int128 polyfill** — works on Unity's current runtime (net5.0) without requiring .NET 7+
+- **KD-tree spatial indexing** — integer KD-tree for fast nearest-neighbor lookup
+- **Duplicate handling** — `CdtUtils.RemoveDuplicatesAndRemapEdges` before triangulation
+- **Intersecting constraint edges** — optionally resolve by splitting at the exact integer intersection point
+- **Multi-target:** `net5.0`, `net6.0`, `net8.0`, `net10.0`
 
-**Pre-conditions** (same as the C++ original):
+**Pre-conditions:**
 - No duplicate vertices (use `CdtUtils.RemoveDuplicatesAndRemapEdges` to clean input)
 - No two constraint edges may intersect (or pass `IntersectingConstraintEdges.TryResolve`)
+- Coordinates must be within `±PredicatesInt.MaxCoordinate` (2⁵³ ≈ 9 × 10¹⁵)
 
 **Post-conditions:**
-- All triangles have **counter-clockwise (CCW) winding** in a coordinate system where X points right and Y points up.
+- All triangles have **counter-clockwise (CCW) winding** in a coordinate system where X points right and Y points up
+
+---
 
 ## Installation
 
@@ -37,141 +56,85 @@ CDT is a library for generating **Constrained** and **Conforming** Delaunay Tria
 dotnet add package CDT.NET
 ```
 
+---
+
 ## Usage
 
-### Delaunay triangulation (convex hull, no constraints)
+All coordinates use `V2i` (integer X/Y as `long`). Quantise your world-space coordinates to a fixed integer grid before passing them in.
 
-Insert vertices and call `EraseSuperTriangle` to get the convex-hull triangulation.
+### Delaunay triangulation (convex hull, no constraints)
 
 ```csharp
 using CDT;
 
-var vertices = new List<V2d<double>>
+var vertices = new List<V2i>
 {
-    new(0, 0), new(4, 0), new(4, 4), new(0, 4), new(2, 2),
+    new(0, 0), new(4000, 0), new(4000, 4000), new(0, 4000), new(2000, 2000),
 };
 
-var cdt = new Triangulation<double>();
+var cdt = new Triangulation();
 cdt.InsertVertices(vertices);
 cdt.EraseSuperTriangle(); // produces convex hull
 
-IReadOnlyList<Triangle>    triangles  = cdt.Triangles;
-IReadOnlyList<V2d<double>> points     = cdt.Vertices;
-HashSet<Edge>              allEdges   = CdtUtils.ExtractEdgesFromTriangles(triangles);
+ReadOnlyMemory<Triangle> triangles = cdt.Triangles;
+ReadOnlyMemory<V2i>      points    = cdt.Vertices;
+HashSet<Edge>            allEdges  = CdtUtils.ExtractEdgesFromTriangles(triangles.Span);
 ```
 
 ### Constrained Delaunay triangulation (bounded domain)
 
-Insert boundary edges, then call `EraseOuterTriangles` to keep only the region inside the boundary.
-
 ```csharp
 using CDT;
 
-var vertices = new List<V2d<double>>
+var vertices = new List<V2i>
 {
-    new(0, 0), new(4, 0), new(4, 4), new(0, 4),
+    new(0, 0), new(4000, 0), new(4000, 4000), new(0, 4000),
 };
 var edges = new List<Edge>
 {
     new(0, 1), new(1, 2), new(2, 3), new(3, 0), // square boundary
 };
 
-var cdt = new Triangulation<double>();
+var cdt = new Triangulation();
 cdt.InsertVertices(vertices);
 cdt.InsertEdges(edges);
-cdt.EraseOuterTriangles(); // removes everything outside the boundary
+cdt.EraseOuterTriangles();
 
-IReadOnlyList<Triangle> triangles = cdt.Triangles;
-IReadOnlySet<Edge>      fixedEdges = cdt.FixedEdges; // the constraint edges
+ReadOnlyMemory<Triangle> triangles  = cdt.Triangles;
+IReadOnlySet<Edge>       fixedEdges = cdt.FixedEdges;
 ```
 
 ### Auto-detect boundaries and holes
 
-Use `EraseOuterTrianglesAndHoles` to automatically remove the outer region **and** fill holes. The algorithm uses an even–odd depth rule: depth 0 = outside, depth 1 = inside, depth 2 = hole, etc.
-
 ```csharp
 using CDT;
 
-// Outer square (vertices 0-3) + inner square hole (vertices 4-7)
-var vertices = new List<V2d<double>>
+// Outer square (0-3) + inner hole (4-7)
+var vertices = new List<V2i>
 {
-    new(0, 0), new(6, 0), new(6, 6), new(0, 6), // outer square
-    new(2, 2), new(4, 2), new(4, 4), new(2, 4), // inner hole
+    new(0, 0), new(6000, 0), new(6000, 6000), new(0, 6000),
+    new(2000, 2000), new(4000, 2000), new(4000, 4000), new(2000, 4000),
 };
 var edges = new List<Edge>
 {
-    new(0, 1), new(1, 2), new(2, 3), new(3, 0), // outer boundary (CCW)
-    new(4, 7), new(7, 6), new(6, 5), new(5, 4), // inner hole (CW — opposite winding)
+    new(0, 1), new(1, 2), new(2, 3), new(3, 0), // outer (CCW)
+    new(4, 7), new(7, 6), new(6, 5), new(5, 4), // inner hole (CW)
 };
 
-var cdt = new Triangulation<double>();
+var cdt = new Triangulation();
 cdt.InsertVertices(vertices);
 cdt.InsertEdges(edges);
 cdt.EraseOuterTrianglesAndHoles();
-
-IReadOnlyList<Triangle> triangles = cdt.Triangles;
-```
-
-### Conforming Delaunay triangulation
-
-Use `ConformToEdges` instead of `InsertEdges`. The algorithm may split constraint edges and insert Steiner points (midpoints) until the constraint is represented in the triangulation.
-
-```csharp
-using CDT;
-
-var vertices = new List<V2d<double>>
-{
-    new(0, 0), new(4, 0), new(4, 4), new(0, 4),
-};
-var edges = new List<Edge>
-{
-    new(0, 1), new(1, 2), new(2, 3), new(3, 0),
-};
-
-var cdt = new Triangulation<double>();
-cdt.InsertVertices(vertices);
-cdt.ConformToEdges(edges); // may add Steiner points
-cdt.EraseOuterTriangles();
-```
-
-### Removing duplicate vertices and remapping edges
-
-Input data often contains duplicate vertices (e.g., from shared polygon boundaries). Use `CdtUtils.RemoveDuplicatesAndRemapEdges` to clean up before triangulation.
-
-```csharp
-using CDT;
-
-var vertices = new List<V2d<double>>
-{
-    new(0, 0), new(4, 0), new(4, 4), new(0, 4),
-    new(0, 0), // duplicate of vertex 0
-};
-var edges = new List<Edge>
-{
-    new(0, 4), // will be remapped since vertex 4 is a duplicate of vertex 0
-    new(1, 2),
-};
-
-CdtUtils.RemoveDuplicatesAndRemapEdges(vertices, edges);
-// vertices now has 4 entries; degenerate self-edges like (0,0) can be dropped
-
-var cdt = new Triangulation<double>();
-cdt.InsertVertices(vertices);
-cdt.InsertEdges(edges.Where(e => e.V1 != e.V2).ToList());
-cdt.EraseSuperTriangle();
 ```
 
 ### Resolving intersecting constraint edges
 
-By default, intersecting constraint edges throw an exception. Pass `IntersectingConstraintEdges.TryResolve` to split them at their intersection point instead.
-
 ```csharp
 using CDT;
 
-// Two diagonals of a unit square that cross each other
-var vertices = new List<V2d<double>>
+var vertices = new List<V2i>
 {
-    new(0, 0), new(1, 0), new(1, 1), new(0, 1),
+    new(0, 0), new(1000, 0), new(1000, 1000), new(0, 1000),
 };
 var edges = new List<Edge>
 {
@@ -179,15 +142,55 @@ var edges = new List<Edge>
     new(1, 3), // diagonal ↖ — intersects (0,2)
 };
 
-var cdt = new Triangulation<double>(
+var cdt = new Triangulation(
     VertexInsertionOrder.Auto,
     IntersectingConstraintEdges.TryResolve,
-    minDistToConstraintEdge: 0.0);
+    snapTolerance: 0L);
 
 cdt.InsertVertices(vertices);
-cdt.InsertEdges(edges); // intersection is resolved by inserting a new vertex
+cdt.InsertEdges(edges); // intersection resolved by inserting an exact integer vertex
 cdt.EraseSuperTriangle();
 ```
+
+### Removing duplicate vertices
+
+```csharp
+using CDT;
+
+var vertices = new List<V2i>
+{
+    new(0, 0), new(4000, 0), new(4000, 4000), new(0, 4000),
+    new(0, 0), // duplicate of vertex 0
+};
+var edges = new List<Edge>
+{
+    new(0, 4), // will be remapped since vertex 4 duplicates vertex 0
+    new(1, 2),
+};
+
+CdtUtils.RemoveDuplicatesAndRemapEdges(vertices, edges);
+
+var cdt = new Triangulation();
+cdt.InsertVertices(vertices);
+cdt.InsertEdges(edges.Where(e => e.V1 != e.V2).ToList());
+cdt.EraseSuperTriangle();
+```
+
+---
+
+## Coordinate system
+
+Inputs are integer coordinates (`long`). Quantise your floating-point world coordinates before use:
+
+```csharp
+const long Scale = 1_000_000; // 1 unit = 1 µm if world coords are in metres
+
+V2i ToGrid(float x, float y) => new((long)(x * Scale), (long)(y * Scale));
+```
+
+The maximum safe coordinate magnitude is `PredicatesInt.MaxCoordinate` (2⁵³ ≈ 9 × 10¹⁵). With a scale of 10⁶ this accommodates world coordinates up to ~9 × 10⁹ metres.
+
+---
 
 ## Building
 
@@ -198,7 +201,7 @@ dotnet build
 ## Testing
 
 ```bash
-dotnet run --project test/CDT.Tests
+dotnet test test/CDT.Tests
 ```
 
 ## Benchmarking
@@ -207,54 +210,26 @@ dotnet run --project test/CDT.Tests
 dotnet run -c Release --project benchmark/CDT.Benchmarks
 ```
 
-## Comparison Benchmarks
-
-CDT.NET is benchmarked against other C# and native CDT/Delaunay triangulation libraries on the **"Constrained Sweden"** dataset (~2 600 vertices, ~2 600 constraint edges).
-
-**Libraries compared:** CDT.NET, Triangle.NET, NetTopologySuite (NTS), artem-ogre/CDT (C++), CGAL (C++), Spade (Rust).
-
-> 12th Gen Intel Core i7-12700KF 3.60GHz, 1 CPU, 20 logical and 12 physical cores
-
-| Method                 | Categories   | Mean      | Error      | StdDev    | Ratio |
-|----------------------- |------------- |----------:|-----------:|----------:|------:|
-| CDT.NET                | Conforming   |  1.442 ms |  0.1628 ms | 0.0089 ms |  1.00 |
-| 'artem-ogre/CDT (C++)' | Conforming   |  1.976 ms |  0.0501 ms | 0.0027 ms |  1.37 |
-| 'Spade (Rust)'         | Conforming   |  1.341 ms |  0.2933 ms | 0.0161 ms |  0.93 |
-| 'CGAL (C++)'           | Conforming   |  4.110 ms |  0.3934 ms | 0.0216 ms |  2.85 |
-| NTS                    | Conforming   | 38.288 ms | 39.8335 ms | 2.1834 ms | 26.55 |
-| Triangle.NET           | Conforming   |  3.284 ms |  0.6901 ms | 0.0378 ms |  2.28 |
-|                        |              |           |            |           |       |
-| CDT.NET                | Constrained  |  1.167 ms |  0.0737 ms | 0.0040 ms |  1.00 |
-| 'artem-ogre/CDT (C++)' | Constrained  |  1.766 ms |  0.0619 ms | 0.0034 ms |  1.51 |
-| 'Spade (Rust)'         | Constrained  |  1.256 ms |  0.1233 ms | 0.0068 ms |  1.08 |
-| 'CGAL (C++)'           | Constrained  |  2.613 ms |  0.3773 ms | 0.0207 ms |  2.24 |
-| Triangle.NET           | Constrained  |  3.290 ms |  1.3341 ms | 0.0731 ms |  2.82 |
-|                        |              |           |            |           |       |
-| CDT.NET                | VerticesOnly |  1.072 ms |  0.0045 ms | 0.0002 ms |  1.00 |
-| 'artem-ogre/CDT (C++)' | VerticesOnly |  1.568 ms |  0.2550 ms | 0.0140 ms |  1.46 |
-| 'Spade (Rust)'         | VerticesOnly |  1.038 ms |  0.0224 ms | 0.0012 ms |  0.97 |
-| 'CGAL (C++)'           | VerticesOnly |  2.156 ms |  0.2064 ms | 0.0113 ms |  2.01 |
-| NTS                    | VerticesOnly |  5.608 ms |  2.5000 ms | 0.1370 ms |  5.23 |
-| Triangle.NET           | VerticesOnly |  1.355 ms |  0.0418 ms | 0.0023 ms |  1.26 |
-
-**Key takeaways:**
-- **CDT.NET matches the original C++ implementation (artem-ogre/CDT) and Spade within ≤13%**.
-- **CGAL** runs at ~2× CDT.NET. CGAL's `Constrained_Delaunay_triangulation_2` uses a more complex data structure (half-edge DCEL) with additional bookkeeping overhead vs. CDT.NET's compact flat arrays. For raw triangulation throughput CDT.NET is faster.
-- **CDT.NET allocates 5–120× less managed memory** than Triangle.NET and NTS: Triangle.NET allocates ~5.7× more, NTS ~121× more.
-- **NTS (conforming CDT)** is ~30× slower and allocates ~120× more memory — Steiner-point insertion is the main cost, and the result is semantically different (not true CDT).
-- Native wrappers (artem-ogre/CDT, CGAL, Spade) show zero managed allocations as expected for P/Invoke calls into unmanaged code.
-
-For full details, prerequisites, and instructions on running the comparison benchmarks, see the [CDT.Comparison.Benchmarks README](benchmark/CDT.Comparison.Benchmarks/README.md).
-
-```bash
-dotnet run -c Release --project benchmark/CDT.Comparison.Benchmarks
-```
+---
 
 ## License
 
 [Mozilla Public License Version 2.0](LICENSE)
 
-This software is based in part on [CDT — C++ library for constrained Delaunay triangulation](https://github.com/artem-ogre/CDT):
-Copyright © 2019 Leica Geosystems Technology AB  
-Copyright © The CDT Contributors  
-Licensed under the MPL-2.0 license.
+### Third-party
+
+This project is a fork and C# port of [CDT — C++ library for constrained Delaunay triangulation](https://github.com/artem-ogre/CDT):
+
+```
+Copyright © 2019 Leica Geosystems Technology AB
+Copyright © The CDT Contributors
+Licensed under the Mozilla Public License, Version 2.0
+https://github.com/artem-ogre/CDT
+```
+
+Modifications in this repository (integer arithmetic conversion, Unity compatibility layer, .NET port):
+
+```
+Copyright © 2024 Peter Ølsted
+Licensed under the Mozilla Public License, Version 2.0
+```
