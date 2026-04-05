@@ -4,8 +4,12 @@
 
 namespace CDT.Tests;
 
-/// <summary>Validates that the README code examples compile and produce the expected results.</summary>
-public sealed class ReadmeExamplesTests
+
+/// <summary>
+/// Validates the README code examples with the integer <see cref="Triangulation"/>
+/// (same scenarios, integer-scaled coordinates).
+/// </summary>
+public sealed class ReadmeExamplesTests_Int
 {
     // -------------------------------------------------------------------------
     // Example 1 – Delaunay triangulation without constraints (convex hull)
@@ -14,14 +18,15 @@ public sealed class ReadmeExamplesTests
     [Fact]
     public void Example_DelaunayConvexHull()
     {
-        var vertices = new List<V2d<double>>
+        var vertices = new List<V2i>
         {
-            new(0, 0), new(4, 0), new(4, 4), new(0, 4), new(2, 2), // inner point
+            new(0, 0), new(4_000_000, 0), new(4_000_000, 4_000_000),
+            new(0, 4_000_000), new(2_000_000, 2_000_000),
         };
 
-        var cdt = new Triangulation<double>();
+        var cdt = new Triangulation();
         cdt.InsertVertices(vertices);
-        cdt.EraseSuperTriangle(); // produces convex hull
+        cdt.EraseSuperTriangle();
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
         Assert.Equal(5, cdt.Vertices.Length);
@@ -36,19 +41,19 @@ public sealed class ReadmeExamplesTests
     [Fact]
     public void Example_ConstrainedDelaunay_BoundedDomain()
     {
-        var vertices = new List<V2d<double>>
+        var vertices = new List<V2i>
         {
-            new(0, 0), new(4, 0), new(4, 4), new(0, 4),
+            new(0, 0), new(4_000_000, 0), new(4_000_000, 4_000_000), new(0, 4_000_000),
         };
         var edges = new List<Edge>
         {
-            new(0, 1), new(1, 2), new(2, 3), new(3, 0), // square boundary
+            new(0, 1), new(1, 2), new(2, 3), new(3, 0),
         };
 
-        var cdt = new Triangulation<double>();
+        var cdt = new Triangulation();
         cdt.InsertVertices(vertices);
         cdt.InsertEdges(edges);
-        cdt.EraseOuterTriangles(); // removes everything outside the boundary
+        cdt.EraseOuterTriangles();
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
         Assert.Equal(4, cdt.Vertices.Length);
@@ -63,24 +68,22 @@ public sealed class ReadmeExamplesTests
     [Fact]
     public void Example_AutoDetectBoundariesAndHoles()
     {
-        // Outer square (vertices 0-3) + inner square hole (vertices 4-7)
-        var vertices = new List<V2d<double>>
+        var vertices = new List<V2i>
         {
-            new(0, 0), new(6, 0), new(6, 6), new(0, 6), // outer square
-            new(2, 2), new(4, 2), new(4, 4), new(2, 4), // inner hole
+            new(0, 0), new(6_000_000, 0), new(6_000_000, 6_000_000), new(0, 6_000_000),
+            new(2_000_000, 2_000_000), new(4_000_000, 2_000_000),
+            new(4_000_000, 4_000_000), new(2_000_000, 4_000_000),
         };
         var edges = new List<Edge>
         {
-            // outer boundary (CCW)
             new(0, 1), new(1, 2), new(2, 3), new(3, 0),
-            // inner hole boundary (CW — opposite winding marks it as a hole)
             new(4, 7), new(7, 6), new(6, 5), new(5, 4),
         };
 
-        var cdt = new Triangulation<double>();
+        var cdt = new Triangulation();
         cdt.InsertVertices(vertices);
         cdt.InsertEdges(edges);
-        cdt.EraseOuterTrianglesAndHoles(); // removes outer AND fills holes automatically
+        cdt.EraseOuterTrianglesAndHoles();
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
         Assert.Equal(8, cdt.Vertices.Length);
@@ -94,23 +97,22 @@ public sealed class ReadmeExamplesTests
     [Fact]
     public void Example_ConformingDelaunay()
     {
-        var vertices = new List<V2d<double>>
+        var vertices = new List<V2i>
         {
-            new(0, 0), new(4, 0), new(4, 4), new(0, 4),
+            new(0, 0), new(4_000_000, 0), new(4_000_000, 4_000_000), new(0, 4_000_000),
         };
         var edges = new List<Edge>
         {
             new(0, 1), new(1, 2), new(2, 3), new(3, 0),
         };
 
-        var cdt = new Triangulation<double>();
+        var cdt = new Triangulation();
         cdt.InsertVertices(vertices);
-        cdt.ConformToEdges(edges); // may split edges and add new points
+        cdt.ConformToEdges(edges);
         cdt.EraseOuterTriangles();
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
         Assert.True(cdt.Triangles.Length > 0);
-        // ConformToEdges may have added midpoints, so vertex count >= 4
         Assert.True(cdt.Vertices.Length >= 4);
     }
 
@@ -121,29 +123,25 @@ public sealed class ReadmeExamplesTests
     [Fact]
     public void Example_RemoveDuplicatesAndRemapEdges()
     {
-        var vertices = new List<V2d<double>>
+        var vertices = new List<V2i>
         {
-            new(0, 0), new(4, 0), new(4, 4), new(0, 4),
+            new(0, 0), new(4_000_000, 0), new(4_000_000, 4_000_000), new(0, 4_000_000),
             new(0, 0), // duplicate of vertex 0
         };
         var edges = new List<Edge>
         {
-            new(0, 4), // references duplicate; will be remapped to (0, 0)
-            new(1, 2),
+            new(0, 4), new(1, 2),
         };
 
         CdtUtils.RemoveDuplicatesAndRemapEdges(vertices, edges);
 
-        // Duplicate removed → 4 unique vertices
         Assert.Equal(4, vertices.Count);
-        // Edge (0,4) remapped: both map to index 0 → self-edge (0,0)
         Assert.Equal(new Edge(0, 0), edges[0]);
-        // Edge (1,2) unchanged
         Assert.Equal(new Edge(1, 2), edges[1]);
 
-        var cdt = new Triangulation<double>();
+        var cdt = new Triangulation();
         cdt.InsertVertices(vertices);
-        cdt.InsertEdges(edges.Where(e => e.V1 != e.V2).ToList()); // skip degenerate self-edge
+        cdt.InsertEdges(edges.Where(e => e.V1 != e.V2).ToList());
         cdt.EraseSuperTriangle();
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
@@ -156,14 +154,11 @@ public sealed class ReadmeExamplesTests
     [Fact]
     public void Example_ExtractEdgesFromTriangles()
     {
-        var cdt = new Triangulation<double>();
-        cdt.InsertVertices([new(0, 0), new(2, 0), new(1, 2)]);
+        var cdt = new Triangulation();
+        cdt.InsertVertices([new(0, 0), new(2_000_000, 0), new(1_000_000, 2_000_000)]);
         cdt.EraseSuperTriangle();
 
-        // Extract all unique edges from every triangle
-        HashSet<Edge> allEdges = CdtUtils.ExtractEdgesFromTriangles(cdt.Triangles.Span);
-
-        // A single triangle has exactly 3 edges
+        var allEdges = CdtUtils.ExtractEdgesFromTriangles(cdt.Triangles.Span);
         Assert.Equal(3, allEdges.Count);
     }
 
@@ -174,29 +169,25 @@ public sealed class ReadmeExamplesTests
     [Fact]
     public void Example_ResolveIntersectingConstraints()
     {
-        // Two edges that cross each other: (0,2) and (1,3) on a unit square
-        var vertices = new List<V2d<double>>
+        var vertices = new List<V2i>
         {
-            new(0, 0), new(1, 0), new(1, 1), new(0, 1),
+            new(0, 0), new(1_000_000, 0), new(1_000_000, 1_000_000), new(0, 1_000_000),
         };
         var edges = new List<Edge>
         {
-            new(0, 2), // diagonal
-            new(1, 3), // other diagonal — intersects (0,2)
+            new(0, 2), new(1, 3),
         };
 
-        // TryResolve splits intersecting edges by inserting the intersection point
-        var cdt = new Triangulation<double>(
+        var cdt = new Triangulation(
             VertexInsertionOrder.Auto,
             IntersectingConstraintEdges.TryResolve,
-            0.0);
+            0L);
 
         cdt.InsertVertices(vertices);
         cdt.InsertEdges(edges);
         cdt.EraseSuperTriangle();
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
-        // An extra vertex is added at the intersection
         Assert.True(cdt.Vertices.Length > 4);
     }
 }

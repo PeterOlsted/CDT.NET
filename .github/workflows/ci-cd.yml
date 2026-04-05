@@ -35,6 +35,7 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
+            6.0.x
             8.0.x
             10.0.x
 
@@ -73,19 +74,29 @@ jobs:
           dotnet build --no-restore -c Release test/CDT.Tests/CDT.Tests.csproj
 
       # Windows: test CDT.Tests only (CDT.Comparison.Benchmarks excluded from CI build)
+      # CoverletOutput must end with / so Coverlet names files per-TFM inside the dir
       - name: Test
         if: runner.os == 'Windows'
-        run: dotnet test --no-build -c Release --verbosity normal /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura /p:CoverletOutput=${{ github.workspace }}/coverage/coverage.cobertura.xml test/CDT.Tests/CDT.Tests.csproj
+        run: dotnet test --no-build -c Release --verbosity normal /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura /p:CoverletOutput=${{ github.workspace }}/coverage/ test/CDT.Tests/CDT.Tests.csproj
 
       # Linux: test only CDT.Tests (CDT.Viz has no tests; benchmark is not a test project)
       - name: Test
         if: runner.os == 'Linux'
-        run: dotnet test --no-build -c Release --verbosity normal /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura /p:CoverletOutput=${{ github.workspace }}/coverage/coverage.cobertura.xml test/CDT.Tests/CDT.Tests.csproj
+        run: dotnet test --no-build -c Release --verbosity normal /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura /p:CoverletOutput=${{ github.workspace }}/coverage/ test/CDT.Tests/CDT.Tests.csproj
+
+      - name: Inspect coverage output (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Get-ChildItem "${{ github.workspace }}/coverage" -Force -ErrorAction SilentlyContinue
+
+      - name: Inspect coverage output (Linux)
+        if: runner.os == 'Linux'
+        run: ls -la ${{ github.workspace }}/coverage || true
 
       - name: Generate coverage report
         uses: danielpalme/ReportGenerator-GitHub-Action@5
         with:
-          reports: ${{ github.workspace }}/coverage/coverage.cobertura.xml
+          reports: ${{ github.workspace }}/coverage/*.xml
           targetdir: coveragereport
           reporttypes: MarkdownSummaryGithub
 

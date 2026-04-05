@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-using System.Numerics;
 using System.Runtime.CompilerServices;
+using CDT.Predicates;
 using static CDT.CdtUtils;
 
 namespace CDT;
@@ -65,44 +65,103 @@ public sealed class IntersectingConstraintsException : TriangulationException
     }
 }
 
+// =========================================================================
+// Shared helpers (no dependency on generic math — available on all TFMs)
+// =========================================================================
+
+internal static class DictionaryExtensions
+{
+    public static TVal GetOrAdd<TKey, TVal>(this Dictionary<TKey, TVal> dict, TKey key)
+        where TKey : notnull
+        where TVal : new()
+    {
+        if (!dict.TryGetValue(key, out var val))
+        {
+            val = new TVal();
+            dict[key] = val;
+        }
+        return val;
+    }
+}
+
 /// <summary>
-/// 2D constrained Delaunay triangulation.
-/// Supports both constrained and conforming modes.
+/// Provides a covariant read-only view over a <see cref="Dictionary{TKey,TInner}"/>
+/// where <typeparamref name="TInner"/> is assignable to <typeparamref name="TOuter"/>.
 /// </summary>
-/// <typeparam name="T">Floating-point coordinate type (float or double).</typeparam>
-public sealed class Triangulation<T>
-    where T : unmanaged, IFloatingPoint<T>, IMinMaxValue<T>, IRootFunctions<T>
+internal sealed class CovariantReadOnlyDictionary<TKey, TInner, TOuter>(Dictionary<TKey, TInner> inner)
+    : IReadOnlyDictionary<TKey, TOuter>
+    where TKey : notnull
+    where TInner : TOuter
+{
+    public TOuter this[TKey key] => inner[key];
+    public IEnumerable<TKey> Keys => inner.Keys;
+    public IEnumerable<TOuter> Values => inner.Values.Cast<TOuter>();
+    public int Count => inner.Count;
+    public bool ContainsKey(TKey key) => inner.ContainsKey(key);
+    public bool TryGetValue(TKey key, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out TOuter value)
+    {
+        if (inner.TryGetValue(key, out var v)) { value = v!; return true; }
+        value = default!;
+        return false;
+    }
+    public IEnumerator<KeyValuePair<TKey, TOuter>> GetEnumerator() =>
+        inner.Select(kv => new KeyValuePair<TKey, TOuter>(kv.Key, kv.Value)).GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+}
+// =========================================================================
+// Triangulation — non-generic integer CDT (net5.0+)
+// =========================================================================
+
+/// <summary>
+/// 2D constrained Delaunay triangulation using exact 64-bit integer arithmetic.
+/// All input coordinates must satisfy |x|, |y| ≤ <see cref="PredicatesInt.MaxCoordinate"/> = 2^53.
+/// </summary>
+/// <remarks>
+/// Operates on <see cref="V2i"/> vertices using exact integer geometric predicates throughout.
+/// No floating-point arithmetic is used in the triangulation core.
+/// </remarks>
+public sealed class Triangulation
 {
     // -------------------------------------------------------------------------
     // Public state (read-only views)
     // -------------------------------------------------------------------------
 
     /// <summary>All vertices in the triangulation (including super-triangle vertices while not finalized).</summary>
-    public ReadOnlyMemory<V2d<T>> Vertices => new(_vertices, 0, _verticesCount);
+    public ReadOnlyMemory<V2i> Vertices => new(_vertices, 0, _verticesCount);
 
     /// <summary>All triangles in the triangulation.</summary>
     public ReadOnlyMemory<Triangle> Triangles => new(_triangles, 0, _trianglesCount);
 
     /// <summary>Set of constraint (fixed) edges.</summary>
+    /// <remarks>Backed by a <see cref="System.Collections.Generic.HashSet{T}"/>.
+    /// Iteration order is not deterministic and must not be relied upon.
+    /// Use <c>Contains</c> for membership tests.</remarks>
     public IReadOnlySet<Edge> FixedEdges => _fixedEdges;
 
     /// <summary>
     /// Stores count of overlapping boundaries for a fixed edge.
     /// Only has entries for edges that represent overlapping boundaries.
     /// </summary>
+    /// <remarks>Backed by a <see cref="System.Collections.Generic.Dictionary{TKey,TValue}"/>.
+    /// Iteration order is not deterministic.</remarks>
     public IReadOnlyDictionary<Edge, ushort> OverlapCount => _overlapCount;
 
     /// <summary>
     /// Stores the list of original edges represented by a given fixed edge.
     /// Only populated when edges were split or overlap.
     /// </summary>
+    /// <remarks>Backed by a <see cref="System.Collections.Generic.Dictionary{TKey,TValue}"/>.
+    /// Iteration order is not deterministic. The triangulation output (vertex and triangle
+    /// arrays) is fully deterministic regardless of the order these dictionaries are iterated
+    /// internally — all algorithmic decisions use <c>Contains</c>/<c>TryGetValue</c> lookups,
+    /// not enumeration.</remarks>
     public IReadOnlyDictionary<Edge, IReadOnlyList<Edge>> PieceToOriginals => _pieceToOriginalsView;
 
     // -------------------------------------------------------------------------
     // Private fields
     // -------------------------------------------------------------------------
 
-    private V2d<T>[] _vertices = [];
+    private V2i[] _vertices = [];
     private int _verticesCount;
     private Triangle[] _triangles = [];
     private int _trianglesCount;
@@ -113,17 +172,14 @@ public sealed class Triangulation<T>
 
     private readonly VertexInsertionOrder _insertionOrder;
     private readonly IntersectingConstraintEdges _intersectingEdgesStrategy;
-    private readonly T _minDistToConstraintEdge;
-    private readonly T _two;
+    private readonly long _snapTolerance;
     private SuperGeometryType _superGeomType;
     private int _nTargetVerts;
 
-    // For each vertex: one adjacent triangle index
     private int[] _vertTris = [];
     private int _vertTrisCount;
 
-    // KD-tree for nearest-point location
-    private KdTree<T>? _kdTree;
+    private KdTree? _kdTree;
 
     // -------------------------------------------------------------------------
     // Construction
@@ -133,27 +189,40 @@ public sealed class Triangulation<T>
     /// Creates a triangulation with default settings:
     /// <see cref="VertexInsertionOrder.Auto"/>,
     /// <see cref="IntersectingConstraintEdges.NotAllowed"/>,
-    /// zero minimum distance.
+    /// zero snap tolerance.
     /// </summary>
     public Triangulation()
-        : this(VertexInsertionOrder.Auto, IntersectingConstraintEdges.NotAllowed, T.Zero)
+        : this(VertexInsertionOrder.Auto, IntersectingConstraintEdges.NotAllowed, 0L)
     { }
 
     /// <summary>Creates a triangulation with the specified insertion order.</summary>
     public Triangulation(VertexInsertionOrder insertionOrder)
-        : this(insertionOrder, IntersectingConstraintEdges.NotAllowed, T.Zero)
+        : this(insertionOrder, IntersectingConstraintEdges.NotAllowed, 0L)
     { }
 
     /// <summary>Creates a triangulation with explicit settings.</summary>
+    /// <param name="insertionOrder">Order in which vertices are inserted.</param>
+    /// <param name="intersectingEdgesStrategy">How to handle intersecting constraint edges.</param>
+    /// <param name="snapTolerance">
+    /// Area-units snap tolerance for constraint-edge processing.
+    /// A point whose <c>|Orient2dRaw|</c> ≤ this value is considered on the line.
+    /// Default is 0 (exact arithmetic, no snapping).
+    /// </param>
+    /// <param name="randomSeed">
+    /// Seed for the Fisher-Yates shuffle used when <paramref name="insertionOrder"/> is
+    /// <see cref="VertexInsertionOrder.Auto"/>. The default value of <c>0</c> produces
+    /// fully deterministic output. Pass different seeds to explore alternative orderings.
+    /// </param>
     public Triangulation(
         VertexInsertionOrder insertionOrder,
         IntersectingConstraintEdges intersectingEdgesStrategy,
-        T minDistToConstraintEdge)
+        long snapTolerance = 0L,
+        int randomSeed = 0)
     {
         _insertionOrder = insertionOrder;
         _intersectingEdgesStrategy = intersectingEdgesStrategy;
-        _minDistToConstraintEdge = minDistToConstraintEdge;
-        _two = T.One + T.One;
+        _snapTolerance = snapTolerance;
+        _rng = new Random(randomSeed);
         _superGeomType = SuperGeometryType.SuperTriangle;
         _nTargetVerts = 0;
         _pieceToOriginalsView = new CovariantReadOnlyDictionary<Edge, List<Edge>, IReadOnlyList<Edge>>(_pieceToOriginals);
@@ -164,15 +233,26 @@ public sealed class Triangulation<T>
     // -------------------------------------------------------------------------
 
     /// <summary>Inserts a list of vertices into the triangulation.</summary>
-    public void InsertVertices(IReadOnlyList<V2d<T>> newVertices)
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when any coordinate exceeds <see cref="PredicatesInt.MaxCoordinate"/>.
+    /// </exception>
+    public void InsertVertices(IReadOnlyList<V2i> newVertices)
     {
         if (IsFinalized) throw new TriangulationFinalizedException();
         if (newVertices.Count == 0) return;
 
+        // Validate coordinate range before touching the triangulation.
+        foreach (var v in newVertices)
+        {
+            if ((ulong)(v.X + PredicatesInt.MaxCoordinate) > (ulong)(2 * PredicatesInt.MaxCoordinate) ||
+                (ulong)(v.Y + PredicatesInt.MaxCoordinate) > (ulong)(2 * PredicatesInt.MaxCoordinate))
+                throw new ArgumentOutOfRangeException(nameof(newVertices),
+                    $"Vertex ({v.X},{v.Y}) exceeds MaxCoordinate = {PredicatesInt.MaxCoordinate}. " +
+                    "Integer predicates produce incorrect results outside this range.");
+        }
+
         bool isFirstInsertion = _kdTree == null && _verticesCount == 0;
 
-        // Pre-allocate backing arrays once we know the incoming vertex count.
-        // Euler's formula: a planar triangulation of N points has ~2N triangles.
         if (isFirstInsertion)
         {
             int n = newVertices.Count;
@@ -181,9 +261,7 @@ public sealed class Triangulation<T>
             ArrayEnsureCapacity(ref _triangles, 2 * n + 4);
         }
 
-        // Build bounding box of new vertices
-        var box = new Box2d<T>();
-        box.Envelop(newVertices);
+        var box = Box2i.Of(newVertices);
 
         if (isFirstInsertion)
         {
@@ -191,7 +269,6 @@ public sealed class Triangulation<T>
         }
         else if (_kdTree == null)
         {
-            // Subsequent calls: initialize the KD tree with all existing vertices
             InitKdTree();
         }
 
@@ -203,18 +280,14 @@ public sealed class Triangulation<T>
 
         if (_insertionOrder == VertexInsertionOrder.Auto && isFirstInsertion)
         {
-            // Use BFS KD-tree ordering for the first bulk insertion
-            // Walk-start comes from the BFS parent, not the KD tree
             InsertVertices_KDTreeBFS(insertStart, box);
         }
         else if (_insertionOrder == VertexInsertionOrder.Auto)
         {
-            // Subsequent calls: randomized with KD-tree walk-start
             InsertVertices_Randomized(insertStart);
         }
         else
         {
-            // AsProvided: sequential order, KD-tree walk-start
             var stack = new Stack<int>(4);
             for (int iV = insertStart; iV < _verticesCount; iV++)
             {
@@ -296,7 +369,7 @@ public sealed class Triangulation<T>
         FinalizeTriangulation(toErase);
     }
 
-    /// <summary>Removes all outer triangles (flood-fill from super-triangle vertex until a constraint edge).</summary>
+    /// <summary>Removes all outer triangles (flood-fill from super-triangle vertex to constraint edge).</summary>
     public void EraseOuterTriangles()
     {
         if (IsFinalized) throw new TriangulationFinalizedException();
@@ -308,10 +381,7 @@ public sealed class Triangulation<T>
         FinalizeTriangulation(toErase);
     }
 
-    /// <summary>
-    /// Removes outer triangles and automatically detects and removes holes
-    /// using even-odd depth rule.
-    /// </summary>
+    /// <summary>Removes outer triangles and holes using even-odd depth rule.</summary>
     public void EraseOuterTrianglesAndHoles()
     {
         if (IsFinalized) throw new TriangulationFinalizedException();
@@ -325,41 +395,45 @@ public sealed class Triangulation<T>
     }
 
     /// <summary>
-    /// Indicates whether the triangulation has been finalized (i.e., one of the
-    /// Erase methods was called). Further modification is not possible.
+    /// Indicates whether the triangulation has been finalized.
     /// </summary>
     public bool IsFinalized => _vertTrisCount == 0 && _verticesCount > 0;
 
     // -------------------------------------------------------------------------
-    // Internal helpers – super-triangle setup
+    // Internal – super-triangle
     // -------------------------------------------------------------------------
 
-    private void AddSuperTriangle(Box2d<T> box)
+    private void AddSuperTriangle(Box2i box)
     {
         _nTargetVerts = Indices.SuperTriangleVertexCount;
         _superGeomType = SuperGeometryType.SuperTriangle;
 
-        T cx = (box.Min.X + box.Max.X) / _two;
-        T cy = (box.Min.Y + box.Max.Y) / _two;
-        T w = box.Max.X - box.Min.X;
-        T h = box.Max.Y - box.Min.Y;
-        T r = T.Max(w, h);
-        r = T.Max(_two * r, T.One);
+        long minX = box.Min.X, minY = box.Min.Y;
+        long maxX = box.Max.X, maxY = box.Max.Y;
+        long cx   = (minX + maxX) / 2L;
+        long cy   = (minY + maxY) / 2L;
+        long w    = maxX - minX;
+        long h    = maxY - minY;
 
-        // Guard against very large numbers
-        while (cy <= cy - r) r = _two * r;
+        // Mirror the float CDT's construction so the super-triangle has the
+        // same generous margins (≈3.5× bbox) and multi-batch insertion works.
+        long r = Math.Max(w, h);
+        r = Math.Max(2L * r, 1L);   // r = max(2*max(w,h), 1)
+        long R = 2L * r;
+        // cos30 ≈ 866/1000; bias by +1 to guarantee strict containment
+        long shiftX = R * 866L / 1000L + 1L;
 
-        T R = _two * r;
-        T cos30 = ParseT("0.8660254037844386");
-        T shiftX = R * cos30;
+        var v0 = new V2i(cx - shiftX, cy - r);
+        var v1 = new V2i(cx + shiftX, cy - r);
+        var v2 = new V2i(cx,           cy + R);
 
-        var v1 = new V2d<T>(cx - shiftX, cy - r);
-        var v2 = new V2d<T>(cx + shiftX, cy - r);
-        var v3 = new V2d<T>(cx, cy + R);
+        System.Diagnostics.Debug.Assert(
+            Math.Abs(v0.X) <= (long)9e15 && Math.Abs(v1.X) <= (long)9e15 && Math.Abs(v2.Y) <= (long)9e15,
+            "Super-triangle vertices exceed safe range");
 
+        AddNewVertex(v0, 0);
         AddNewVertex(v1, 0);
         AddNewVertex(v2, 0);
-        AddNewVertex(v3, 0);
 
         AddTriangle(new Triangle(0, 1, 2, Indices.NoNeighbor, Indices.NoNeighbor, Indices.NoNeighbor));
 
@@ -369,17 +443,17 @@ public sealed class Triangulation<T>
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AddNewVertex(V2d<T> pos, int iTri)
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private void AddNewVertex(V2i pos, int iTri)
     {
         ArrayAdd(ref _vertices, ref _verticesCount, pos);
         ArrayAdd(ref _vertTris, ref _vertTrisCount, iTri);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private int AddTriangle() => AddTriangle(new Triangle());
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private int AddTriangle(Triangle t)
     {
         int idx = _trianglesCount;
@@ -388,13 +462,12 @@ public sealed class Triangulation<T>
     }
 
     // -------------------------------------------------------------------------
-    // Low-level array-growth helpers
+    // Low-level array helpers
     // -------------------------------------------------------------------------
 
-    // Maximum element count for which a temporary int[] is stackalloc'd instead of heap-allocated.
     private const int StackAllocThreshold = 512;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static void ArrayAdd<TItem>(ref TItem[] arr, ref int count, TItem item)
     {
         if (count == arr.Length)
@@ -402,7 +475,7 @@ public sealed class Triangulation<T>
         arr[count++] = item;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static void ArrayEnsureCapacity<TItem>(ref TItem[] arr, int capacity)
     {
         if (arr.Length < capacity)
@@ -410,7 +483,7 @@ public sealed class Triangulation<T>
     }
 
     // -------------------------------------------------------------------------
-    // Internal helpers – vertex insertion
+    // Vertex insertion
     // -------------------------------------------------------------------------
 
     private void InsertVertex(int iVert, int walkStart, Stack<int> stack)
@@ -440,7 +513,6 @@ public sealed class Triangulation<T>
 
     private void InsertVertex(int iVert)
     {
-        // Walk-start from KD-tree nearest point, or vertex 0 as fallback
         int near = _kdTree != null
             ? _kdTree.Nearest(_vertices[iVert].X, _vertices[iVert].Y, _vertices)
             : 0;
@@ -454,14 +526,16 @@ public sealed class Triangulation<T>
         for (int i = 0; i < count; i++) { indices[i] = superGeomVertCount + i; }
         for (int i = count - 1; i > 0; i--)
         {
-            int j = Random.Shared.Next(i + 1);
+            int j = _rng.Next(i + 1);
             (indices[i], indices[j]) = (indices[j], indices[i]);
         }
         var stack = new Stack<int>(4);
         foreach (int iV in indices) { InsertVertex(iV, stack); }
     }
 
-    private void InsertVertices_KDTreeBFS(int superGeomVertCount, Box2d<T> box)
+    private readonly Random _rng;
+
+    private void InsertVertices_KDTreeBFS(int superGeomVertCount, Box2i box)
     {
         int vertexCount = _verticesCount - superGeomVertCount;
         if (vertexCount <= 0) { return; }
@@ -469,7 +543,7 @@ public sealed class Triangulation<T>
         Span<int> indices = vertexCount <= StackAllocThreshold ? stackalloc int[vertexCount] : new int[vertexCount];
         for (int i = 0; i < vertexCount; i++) { indices[i] = superGeomVertCount + i; }
 
-        var queue = new Queue<(int lo, int hi, T boxMinX, T boxMinY, T boxMaxX, T boxMaxY, int parent)>();
+        var queue = new Queue<(int lo, int hi, long boxMinX, long boxMinY, long boxMaxX, long boxMaxY, int parent)>();
         queue.Enqueue((0, vertexCount, box.Min.X, box.Min.Y, box.Max.X, box.Max.Y, 0));
 
         var stack = new Stack<int>(4);
@@ -482,10 +556,10 @@ public sealed class Triangulation<T>
 
             int midPos = lo + len / 2;
 
-            if (T.CreateChecked(boxMaxX - boxMinX) >= T.CreateChecked(boxMaxY - boxMinY))
+            if ((boxMaxX - boxMinX) >= (boxMaxY - boxMinY))
             {
                 NthElement(indices, lo, midPos, hi, new VertexXComparer(_vertices));
-                T split = _vertices[indices[midPos]].X;
+                long split = _vertices[indices[midPos]].X;
                 InsertVertex(indices[midPos], parent, stack);
                 if (lo < midPos) { queue.Enqueue((lo, midPos, boxMinX, boxMinY, split, boxMaxY, indices[midPos])); }
                 if (midPos + 1 < hi) { queue.Enqueue((midPos + 1, hi, split, boxMinY, boxMaxX, boxMaxY, indices[midPos])); }
@@ -493,7 +567,7 @@ public sealed class Triangulation<T>
             else
             {
                 NthElement(indices, lo, midPos, hi, new VertexYComparer(_vertices));
-                T split = _vertices[indices[midPos]].Y;
+                long split = _vertices[indices[midPos]].Y;
                 InsertVertex(indices[midPos], parent, stack);
                 if (lo < midPos) { queue.Enqueue((lo, midPos, boxMinX, boxMinY, boxMaxX, split, indices[midPos])); }
                 if (midPos + 1 < hi) { queue.Enqueue((midPos + 1, hi, boxMinX, split, boxMaxX, boxMaxY, indices[midPos])); }
@@ -502,34 +576,28 @@ public sealed class Triangulation<T>
     }
 
     // -------------------------------------------------------------------------
-    // nth_element — O(n) average quickselect for spatial BFS partitioning
+    // nth_element quickselect
     // -------------------------------------------------------------------------
 
     private readonly struct VertexXComparer : IComparer<int>
     {
-        private readonly V2d<T>[] _vertices;
-        public VertexXComparer(V2d<T>[] vertices) => _vertices = vertices;
+        private readonly V2i[] _vertices;
+        public VertexXComparer(V2i[] vertices) => _vertices = vertices;
         public int Compare(int a, int b) => _vertices[a].X.CompareTo(_vertices[b].X);
     }
 
     private readonly struct VertexYComparer : IComparer<int>
     {
-        private readonly V2d<T>[] _vertices;
-        public VertexYComparer(V2d<T>[] vertices) => _vertices = vertices;
+        private readonly V2i[] _vertices;
+        public VertexYComparer(V2i[] vertices) => _vertices = vertices;
         public int Compare(int a, int b) => _vertices[a].Y.CompareTo(_vertices[b].Y);
     }
 
-    /// <summary>
-    /// Rearranges <paramref name="arr"/> in [<paramref name="lo"/>, <paramref name="hi"/>)
-    /// so the element at position <paramref name="nth"/> is the one that would be there
-    /// after a full sort; elements before it are ≤ it and elements after are ≥ it.
-    /// </summary>
     private static void NthElement<TComparer>(Span<int> arr, int lo, int nth, int hi, TComparer cmp)
         where TComparer : struct, IComparer<int>
     {
         while (lo < hi - 1)
         {
-            // Pivot: middle element avoids worst-case on sorted input
             int mid = lo + (hi - lo) / 2;
             (arr[mid], arr[hi - 1]) = (arr[hi - 1], arr[mid]);
             int store = lo;
@@ -551,7 +619,6 @@ public sealed class Triangulation<T>
     private void InsertVertex_FlipFixedEdges(int iV, Stack<int> stack, List<Edge> flipped)
     {
         flipped.Clear();
-        // Use KD-tree if available, otherwise fall back to vertex 0 (first super-triangle vertex)
         int near = _kdTree != null
             ? _kdTree.Nearest(_vertices[iV].X, _vertices[iV].Y, _vertices)
             : 0;
@@ -609,15 +676,14 @@ public sealed class Triangulation<T>
 
     private (int iT, int iTopo) WalkingSearchTrianglesAt(int iVert, int startVertex)
     {
-        var v = _vertices[iVert];
+        V2i v = _vertices[iVert];
         int iT = WalkTriangles(startVertex, v);
         var t = _triangles[iT];
 
-        var loc = LocatePointTriangle(v, _vertices[t.V0], _vertices[t.V1], _vertices[t.V2]);
+        var loc = CdtUtils.LocatePointTriangle(v, _vertices[t.V0], _vertices[t.V1], _vertices[t.V2]);
 
         if (loc == PtTriLocation.Outside)
         {
-            // Walk hit a degenerate cycle; fall back to brute-force linear scan
             iT = FindTriangleLinear(v, out loc);
             t = _triangles[iT];
         }
@@ -634,13 +700,12 @@ public sealed class Triangulation<T>
         return (iT, iNeigh);
     }
 
-    /// <summary>Brute-force O(n) fallback: scan all triangles to find the one containing <paramref name="pos"/>.</summary>
-    private int FindTriangleLinear(V2d<T> pos, out PtTriLocation loc)
+    private int FindTriangleLinear(V2i pos, out PtTriLocation loc)
     {
         for (int i = 0; i < _trianglesCount; i++)
         {
             var t = _triangles[i];
-            loc = LocatePointTriangle(pos, _vertices[t.V0], _vertices[t.V1], _vertices[t.V2]);
+            loc = CdtUtils.LocatePointTriangle(pos, _vertices[t.V0], _vertices[t.V1], _vertices[t.V2]);
             if (loc != PtTriLocation.Outside)
             {
                 return i;
@@ -649,7 +714,7 @@ public sealed class Triangulation<T>
         throw new TriangulationException($"No triangle found for point ({pos.X}, {pos.Y}).");
     }
 
-    private int WalkTriangles(int startVertex, V2d<T> pos)
+    private int WalkTriangles(int startVertex, V2i pos)
     {
         int currTri = _vertTris[startVertex];
         for (int guard = 0; guard < 1_000_000; guard++)
@@ -662,7 +727,7 @@ public sealed class Triangulation<T>
                 int idx = (i + offset) % 3;
                 int vStart = t.GetVertex(idx);
                 int vEnd = t.GetVertex(CdtUtils.Ccw(idx));
-                var loc = LocatePointLine(pos, _vertices[vStart], _vertices[vEnd]);
+                var loc = CdtUtils.LocatePointLine(pos, _vertices[vStart], _vertices[vEnd]);
                 int iN = t.GetNeighbor(idx);
                 if (loc == PtLineLocation.Right && iN != Indices.NoNeighbor)
                 {
@@ -673,7 +738,6 @@ public sealed class Triangulation<T>
             }
             if (found) { return currTri; }
         }
-        // Walk did not converge (very degenerate triangulation) — let caller fall back.
         return currTri;
     }
 
@@ -787,21 +851,19 @@ public sealed class Triangulation<T>
         int oi = CdtUtils.NeighborIndex(tOpo, iT);
         int ov = CdtUtils.OpposedVertexIndex(oi);
         iV3 = tOpo.GetVertex(ov);
-        // n2 and n4 use the NEIGHBOR position (oi), not the vertex position (ov)
         n2 = tOpo.GetNeighbor(CdtUtils.Ccw(oi));
         n4 = tOpo.GetNeighbor(CdtUtils.Cw(oi));
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private bool IsFlipNeeded(int iV1, int iV2, int iV3, int iV4)
     {
-        // Skip HashSet lookup when there are no fixed edges (pure vertex-insertion path).
         if (_fixedEdges.Count > 0 && _fixedEdges.Contains(new Edge(iV2, iV4))) return false;
 
-        var v1 = _vertices[iV1];
-        var v2 = _vertices[iV2];
-        var v3 = _vertices[iV3];
-        var v4 = _vertices[iV4];
+        V2i v1 = _vertices[iV1];
+        V2i v2 = _vertices[iV2];
+        V2i v3 = _vertices[iV3];
+        V2i v4 = _vertices[iV4];
 
         if (_superGeomType == SuperGeometryType.SuperTriangle)
         {
@@ -809,25 +871,25 @@ public sealed class Triangulation<T>
             if (iV1 < st)
             {
                 if (iV2 < st)
-                    return LocatePointLine(v2, v3, v4) == LocatePointLine(v1, v3, v4);
+                    return CdtUtils.LocatePointLine(v2, v3, v4) == CdtUtils.LocatePointLine(v1, v3, v4);
                 if (iV4 < st)
-                    return LocatePointLine(v4, v2, v3) == LocatePointLine(v1, v2, v3);
+                    return CdtUtils.LocatePointLine(v4, v2, v3) == CdtUtils.LocatePointLine(v1, v2, v3);
                 return false;
             }
             if (iV3 < st)
             {
                 if (iV2 < st)
-                    return LocatePointLine(v2, v1, v4) == LocatePointLine(v3, v1, v4);
+                    return CdtUtils.LocatePointLine(v2, v1, v4) == CdtUtils.LocatePointLine(v3, v1, v4);
                 if (iV4 < st)
-                    return LocatePointLine(v4, v2, v1) == LocatePointLine(v3, v2, v1);
+                    return CdtUtils.LocatePointLine(v4, v2, v1) == CdtUtils.LocatePointLine(v3, v2, v1);
                 return false;
             }
             if (iV2 < st)
-                return LocatePointLine(v2, v3, v4) == LocatePointLine(v1, v3, v4);
+                return CdtUtils.LocatePointLine(v2, v3, v4) == CdtUtils.LocatePointLine(v1, v3, v4);
             if (iV4 < st)
-                return LocatePointLine(v4, v2, v3) == LocatePointLine(v1, v2, v3);
+                return CdtUtils.LocatePointLine(v4, v2, v3) == CdtUtils.LocatePointLine(v1, v2, v3);
         }
-        return IsInCircumcircle(v1, v2, v3, v4);
+        return CdtUtils.IsInCircumcircle(v1, v2, v3, v4);
     }
 
     private void FlipEdge(
@@ -868,11 +930,9 @@ public sealed class Triangulation<T>
             return;
         }
 
-        var a = _vertices[iA];
-        var b = _vertices[iB];
-        T distTol = _minDistToConstraintEdge == T.Zero
-            ? T.Zero
-            : _minDistToConstraintEdge * CdtUtils.Distance(a, b);
+        V2i a = _vertices[iA];
+        V2i b = _vertices[iB];
+        long distTol = _snapTolerance;
 
         var (iT, iVL, iVR) = IntersectedTriangle(iA, a, b, distTol);
         if (iT == Indices.NoNeighbor)
@@ -906,7 +966,7 @@ public sealed class Triangulation<T>
             HandleIntersectingEdgeStrategy(iVL, iVR, iA, iB, iT, iTopo, originalEdge, a, b, distTol, remaining, tppIterations, out bool @return);
             if (@return) return;
 
-            var loc = LocatePointLine(_vertices[iVopo], a, b, distTol);
+            var loc = CdtUtils.LocatePointLine(_vertices[iVopo], a, b, distTol);
             if (loc == PtLineLocation.Left)
             {
                 var e = new Edge(polyL[^1], iVopo);
@@ -925,7 +985,7 @@ public sealed class Triangulation<T>
                 iV = iVR;
                 iVR = iVopo;
             }
-            else // on line
+            else
             {
                 iB = iVopo;
             }
@@ -940,13 +1000,11 @@ public sealed class Triangulation<T>
         polyL.Add(iB);
         polyR.Add(iB);
 
-        // Ensure start/end vertices have valid non-intersected triangle
         if (_vertTris[iA] == intersected[0]) PivotVertexTriangleCW(iA);
         if (_vertTris[iB] == intersected[^1]) PivotVertexTriangleCW(iB);
 
         polyR.Reverse();
 
-        // Re-use intersected triangles
         int iTL = intersected[^1]; intersected.RemoveAt(intersected.Count - 1);
         int iTR = intersected[^1]; intersected.RemoveAt(intersected.Count - 1);
 
@@ -966,7 +1024,7 @@ public sealed class Triangulation<T>
 
     private void HandleIntersectingEdgeStrategy(
         int iVL, int iVR, int iA, int iB, int iT, int iTopo,
-        Edge originalEdge, V2d<T> a, V2d<T> b, T distTol,
+        Edge originalEdge, V2i a, V2i b, long distTol,
         List<Edge> remaining, List<TriangulatePseudoPolygonTask> tppIterations,
         out bool @return)
     {
@@ -989,7 +1047,7 @@ public sealed class Triangulation<T>
             case IntersectingConstraintEdges.TryResolve:
                 if (_fixedEdges.Contains(edgeLR))
                 {
-                    var newV = IntersectionPosition(_vertices[iA], _vertices[iB], _vertices[iVL], _vertices[iVR]);
+                    V2i newV = CdtUtils.IntersectionPosition(_vertices[iA], _vertices[iB], _vertices[iVL], _vertices[iVR]);
                     int iNewVert = SplitFixedEdgeAt(edgeLR, newV, iT, iTopo);
                     remaining.Add(new Edge(iA, iNewVert));
                     remaining.Add(new Edge(iNewVert, iB));
@@ -1021,11 +1079,9 @@ public sealed class Triangulation<T>
             return;
         }
 
-        var a = _vertices[iA];
-        var b = _vertices[iB];
-        T distTol = _minDistToConstraintEdge == T.Zero
-            ? T.Zero
-            : _minDistToConstraintEdge * CdtUtils.Distance(a, b);
+        V2i a = _vertices[iA];
+        V2i b = _vertices[iB];
+        long distTol = _snapTolerance;
 
         var (iT, iVleft, iVright) = IntersectedTriangle(iA, a, b, distTol);
         if (iT == Indices.NoNeighbor)
@@ -1045,7 +1101,7 @@ public sealed class Triangulation<T>
             int iTopo = CdtUtils.OpposedTriangle(t, iV);
             var tOpo = _triangles[iTopo];
             int iVopo = CdtUtils.OpposedVertex(tOpo, iT);
-            var vOpo = _vertices[iVopo];
+            V2i vOpo = _vertices[iVopo];
 
             HandleConformIntersecting(iVleft, iVright, iA, iB, iT, iTopo,
                 originals, overlaps, remaining, out bool @return);
@@ -1053,27 +1109,26 @@ public sealed class Triangulation<T>
 
             iT = iTopo;
             t = _triangles[iT];
-            var loc = LocatePointLine(vOpo, a, b, distTol);
+            var loc = CdtUtils.LocatePointLine(vOpo, a, b, distTol);
             if (loc == PtLineLocation.Left) { iV = iVleft; iVleft = iVopo; }
             else if (loc == PtLineLocation.Right) { iV = iVright; iVright = iVopo; }
-            else iB = iVopo; // on line
+            else iB = iVopo;
         }
 
         if (iB != edge.V2)
             remaining.Add(new ConformToEdgeTask(new Edge(iB, edge.V2), originals, overlaps));
 
-        // Insert midpoint and recurse
         int iMid = _verticesCount;
-        var start = _vertices[iA];
-        var end = _vertices[iB];
-        AddNewVertex(new V2d<T>((start.X + end.X) / _two, (start.Y + end.Y) / _two), Indices.NoNeighbor);
+        V2i start = _vertices[iA];
+        V2i end = _vertices[iB];
+        // Overflow-safe midpoint: start + (end - start) / 2
+        AddNewVertex(new V2i(start.X + (end.X - start.X) / 2L, start.Y + (end.Y - start.Y) / 2L), Indices.NoNeighbor);
 
         InsertVertex_FlipFixedEdges(iMid, flipStack, flippedFixed);
 
         remaining.Add(new ConformToEdgeTask(new Edge(iMid, iB), originals, overlaps));
         remaining.Add(new ConformToEdgeTask(new Edge(iA, iMid), originals, overlaps));
 
-        // Re-insert flipped fixed edges
         foreach (var fe in flippedFixed)
         {
             _fixedEdges.Remove(fe);
@@ -1106,7 +1161,7 @@ public sealed class Triangulation<T>
             case IntersectingConstraintEdges.TryResolve:
                 if (_fixedEdges.Contains(edgeLR))
                 {
-                    var newV = IntersectionPosition(_vertices[iA], _vertices[iB], _vertices[iVleft], _vertices[iVright]);
+                    V2i newV = CdtUtils.IntersectionPosition(_vertices[iA], _vertices[iB], _vertices[iVleft], _vertices[iVright]);
                     int iNewVert = SplitFixedEdgeAt(edgeLR, newV, iT, iTopo);
                     remaining.Add(new ConformToEdgeTask(new Edge(iNewVert, iB), originals, overlaps));
                     remaining.Add(new ConformToEdgeTask(new Edge(iA, iNewVert), originals, overlaps));
@@ -1117,10 +1172,9 @@ public sealed class Triangulation<T>
     }
 
     // -------------------------------------------------------------------------
-    // Pseudo-polygon triangulation (for constrained edges)
+    // Pseudo-polygon triangulation
     // -------------------------------------------------------------------------
 
-    // Task: (iA, iB, iT, iParent, iInParent)
     private readonly record struct TriangulatePseudoPolygonTask(int IA, int IB, int IT, int IParent, int IInParent);
 
     private void TriangulatePseudoPolygon(
@@ -1150,7 +1204,6 @@ public sealed class Triangulation<T>
         int iC = FindDelaunayPoint(poly, iA, iB);
         int a = poly[iA], b = poly[iB], c = poly[iC];
 
-        // Second part (after c)
         if (iB - iC > 1)
         {
             int iNext = trianglesToReuse[^1]; trianglesToReuse.RemoveAt(trianglesToReuse.Count - 1);
@@ -1170,7 +1223,6 @@ public sealed class Triangulation<T>
             else outerTris[outerEdge] = iT;
         }
 
-        // First part (before c)
         if (iC - iA > 1)
         {
             int iNext = trianglesToReuse[^1]; trianglesToReuse.RemoveAt(trianglesToReuse.Count - 1);
@@ -1190,7 +1242,6 @@ public sealed class Triangulation<T>
             else outerTris[outerEdge] = iT;
         }
 
-        // Finalize triangle
         ref var parentTri = ref _triangles[iParent]; parentTri.SetNeighbor(iInParent, iT);
         ref var tFinal = ref _triangles[iT]; tFinal.N0 = iParent; tFinal.V0 = a; tFinal.V1 = b; tFinal.V2 = c;
         SetAdjacentTriangle(c, iT);
@@ -1198,14 +1249,14 @@ public sealed class Triangulation<T>
 
     private int FindDelaunayPoint(List<int> poly, int iA, int iB)
     {
-        var a = _vertices[poly[iA]];
-        var b = _vertices[poly[iB]];
+        V2i a = _vertices[poly[iA]];
+        V2i b = _vertices[poly[iB]];
         int best = iA + 1;
-        var bestV = _vertices[poly[best]];
+        V2i bestV = _vertices[poly[best]];
         for (int i = iA + 1; i < iB; i++)
         {
-            var v = _vertices[poly[i]];
-            if (IsInCircumcircle(v, a, b, bestV))
+            V2i v = _vertices[poly[i]];
+            if (CdtUtils.IsInCircumcircle(v, a, b, bestV))
             {
                 best = i;
                 bestV = v;
@@ -1219,7 +1270,7 @@ public sealed class Triangulation<T>
     // -------------------------------------------------------------------------
 
     private (int iT, int iVleft, int iVright) IntersectedTriangle(
-        int iA, V2d<T> a, V2d<T> b, T tolerance)
+        int iA, V2i a, V2i b, long snapTol)
     {
         int startTri = _vertTris[iA];
         int iT = startTri;
@@ -1228,27 +1279,31 @@ public sealed class Triangulation<T>
             var t = _triangles[iT];
             int i = CdtUtils.VertexIndex(t, iA);
             int iP2 = t.GetVertex(CdtUtils.Ccw(i));
-            var p2 = _vertices[iP2];
-            T orientP2 = Orient2D(p2, a, b);
-            var locP2 = CdtUtils.ClassifyOrientation(orientP2, tolerance);
+            V2i p2 = _vertices[iP2];
+            var locP2 = CdtUtils.LocatePointLine(p2, a, b, snapTol);
             if (locP2 == PtLineLocation.Right)
             {
                 int iP1 = t.GetVertex(CdtUtils.Cw(i));
-                var p1 = _vertices[iP1];
-                T orientP1 = Orient2D(p1, a, b);
-                var locP1 = CdtUtils.ClassifyOrientation(orientP1, T.Zero);
+                V2i p1 = _vertices[iP1];
+                var locP1 = CdtUtils.LocatePointLine(p1, a, b, 0L);
                 if (locP1 == PtLineLocation.OnLine)
                     return (Indices.NoNeighbor, iP1, iP1);
                 if (locP1 == PtLineLocation.Left)
                 {
-                    if (tolerance != T.Zero)
+                    if (snapTol != 0L)
                     {
-                        T absp1 = T.Abs(orientP1), absp2 = T.Abs(orientP2);
-                        T closestOrient; int iClosest;
-                        if (absp1 <= absp2) { closestOrient = orientP1; iClosest = iP1; }
-                        else { closestOrient = orientP2; iClosest = iP2; }
-                        if (CdtUtils.ClassifyOrientation(closestOrient, tolerance) == PtLineLocation.OnLine)
-                            return (Indices.NoNeighbor, iClosest, iClosest);
+                        // Compare which of p1, p2 is closer to the line a–b.
+                        // raw1 > 0 (Left), raw2 < -snapTol (Right)
+                        Int128 raw1 = PredicatesInt.Orient2dRaw(p1, a, b); // positive
+                        Int128 raw2 = PredicatesInt.Orient2dRaw(p2, a, b); // negative
+                        Int128 abs2 = -raw2;                                // > snapTol
+
+                        if (raw1 <= abs2) // p1 is closer or equal
+                        {
+                            if (raw1 <= (Int128)snapTol)
+                                return (Indices.NoNeighbor, iP1, iP1);
+                        }
+                        // p2 is closer → abs2 > snapTol → no snap
                     }
                     return (iT, iP1, iP2);
                 }
@@ -1263,13 +1318,13 @@ public sealed class Triangulation<T>
     // Topology changes
     // -------------------------------------------------------------------------
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private void SetAdjacentTriangle(int v, int iT)
     {
         _vertTris[v] = iT;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private void ChangeNeighbor(int iT, int oldN, int newN)
     {
         if (iT == Indices.NoNeighbor) return;
@@ -1279,7 +1334,7 @@ public sealed class Triangulation<T>
         else t.N2 = newN;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private void ChangeNeighbor(int iT, int va, int vb, int newN)
     {
         if (iT == Indices.NoNeighbor) return;
@@ -1337,7 +1392,7 @@ public sealed class Triangulation<T>
         InsertUnique(_pieceToOriginals.GetOrAdd(half2), newOrig);
     }
 
-    private int SplitFixedEdgeAt(Edge edge, V2d<T> splitVert, int iT, int iTopo)
+    private int SplitFixedEdgeAt(Edge edge, V2i splitVert, int iT, int iTopo)
     {
         int iSplit = _verticesCount;
         AddNewVertex(splitVert, Indices.NoNeighbor);
@@ -1454,10 +1509,8 @@ public sealed class Triangulation<T>
     private void RemoveTriangles(HashSet<int> removed)
     {
         if (removed.Count == 0) return;
-        // Build a flat bool[] for O(1) indexed lookup — replaces all HashSet.Contains calls
         var isRemoved = new bool[_trianglesCount];
         foreach (int i in removed) isRemoved[i] = true;
-        // Build compact mapping: old index → new index
         var mapping = new int[_trianglesCount];
         int newIdx = 0;
         for (int i = 0; i < _trianglesCount; i++)
@@ -1465,7 +1518,6 @@ public sealed class Triangulation<T>
             if (isRemoved[i]) { mapping[i] = Indices.NoNeighbor; continue; }
             mapping[i] = newIdx++;
         }
-        // Compact triangle list
         int write = 0;
         for (int i = 0; i < _trianglesCount; i++)
         {
@@ -1473,7 +1525,6 @@ public sealed class Triangulation<T>
             _triangles[write++] = _triangles[i];
         }
         _trianglesCount = write;
-        // Re-map neighbor indices
         for (int i = 0; i < _trianglesCount; i++)
         {
             ref var t = ref _triangles[i];
@@ -1492,7 +1543,6 @@ public sealed class Triangulation<T>
         var depths = new ushort[_trianglesCount];
         for (int i = 0; i < depths.Length; i++) depths[i] = ushort.MaxValue;
 
-        // Find a triangle touching the super-triangle vertex 0
         int seedTri = _vertTrisCount > 0 ? _vertTris[0] : Indices.NoNeighbor;
         if (seedTri == Indices.NoNeighbor && _trianglesCount > 0) seedTri = 0;
 
@@ -1552,16 +1602,15 @@ public sealed class Triangulation<T>
 
     private void InitKdTree()
     {
-        var box = new Box2d<T>();
+        var box = new Box2i();
         box.Envelop(_vertices.AsSpan(0, _verticesCount));
-        _kdTree = new KdTree<T>(box.Min.X, box.Min.Y, box.Max.X, box.Max.Y);
+        _kdTree = new KdTree(box.Min.X, box.Min.Y, box.Max.X, box.Max.Y);
         for (int i = 0; i < _verticesCount; i++)
             _kdTree.Insert(i, _vertices);
     }
 
     private void TryAddVertexToLocator(int iV)
     {
-        // Only add to the locator if it's already initialized
         _kdTree?.Insert(iV, _vertices);
     }
 
@@ -1580,47 +1629,4 @@ public sealed class Triangulation<T>
     {
         foreach (var e in from) InsertUnique(to, e);
     }
-
-    private static T ParseT(string s)
-        => T.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
-}
-
-internal static class DictionaryExtensions
-{
-    public static TVal GetOrAdd<TKey, TVal>(this Dictionary<TKey, TVal> dict, TKey key)
-        where TKey : notnull
-        where TVal : new()
-    {
-        if (!dict.TryGetValue(key, out var val))
-        {
-            val = new TVal();
-            dict[key] = val;
-        }
-        return val;
-    }
-}
-
-/// <summary>
-/// Provides a covariant read-only view over a <see cref="Dictionary{TKey,TInner}"/>
-/// where <typeparamref name="TInner"/> is assignable to <typeparamref name="TOuter"/>.
-/// </summary>
-internal sealed class CovariantReadOnlyDictionary<TKey, TInner, TOuter>(Dictionary<TKey, TInner> inner)
-    : IReadOnlyDictionary<TKey, TOuter>
-    where TKey : notnull
-    where TInner : TOuter
-{
-    public TOuter this[TKey key] => inner[key];
-    public IEnumerable<TKey> Keys => inner.Keys;
-    public IEnumerable<TOuter> Values => inner.Values.Cast<TOuter>();
-    public int Count => inner.Count;
-    public bool ContainsKey(TKey key) => inner.ContainsKey(key);
-    public bool TryGetValue(TKey key, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out TOuter value)
-    {
-        if (inner.TryGetValue(key, out var v)) { value = v!; return true; }
-        value = default!;
-        return false;
-    }
-    public IEnumerator<KeyValuePair<TKey, TOuter>> GetEnumerator() =>
-        inner.Select(kv => new KeyValuePair<TKey, TOuter>(kv.Key, kv.Value)).GetEnumerator();
-    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
