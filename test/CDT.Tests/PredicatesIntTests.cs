@@ -244,23 +244,18 @@ public sealed class PredicatesIntTests
             PredicatesInt.InCircleInt(p, v1, v2, v3));
     }
 
-    // ---- Cross-check: InCircleInt agrees with float InCircle on non-degenerate cases ----
+    // ---- InCircle sign on known non-degenerate cases ----
 
     [Theory]
-    [InlineData(0, 0, 2, 0, 0, 2,  1,  1)]   // inside
-    [InlineData(0, 0, 2, 0, 0, 2,  3,  3)]   // outside
-    [InlineData(0, 0, 4, 0, 0, 3,  1,  1)]   // inside
-    [InlineData(0, 0, 4, 0, 0, 3,  5,  5)]   // outside
-    public void InCircle_AgreesWithDoublePredicateOnNonDegenerate(
-        long ax, long ay, long bx, long by, long cx, long cy, long dx, long dy)
+    [InlineData(0, 0, 2, 0, 0, 2,  1,  1,  1)]   // inside
+    [InlineData(0, 0, 2, 0, 0, 2,  3,  3, -1)]   // outside
+    [InlineData(0, 0, 4, 0, 0, 3,  1,  1,  1)]   // inside
+    [InlineData(0, 0, 4, 0, 0, 3,  5,  5, -1)]   // outside
+    public void InCircle_KnownSignOnNonDegenerate(
+        long ax, long ay, long bx, long by, long cx, long cy, long dx, long dy, int expected)
     {
-        int intResult = PredicatesInt.InCircleInt(ax, ay, bx, by, cx, cy, dx, dy);
-        double floatResult = CDT.Predicates.PredicatesAdaptive.InCircle(
-            (double)ax, (double)ay, (double)bx, (double)by,
-            (double)cx, (double)cy, (double)dx, (double)dy);
-
-        // Signs must agree for non-degenerate cases.
-        Assert.Equal(Math.Sign(floatResult), intResult);
+        int result = PredicatesInt.InCircleInt(ax, ay, bx, by, cx, cy, dx, dy);
+        Assert.Equal(expected, result);
     }
 
     // ---- Degenerate: point at one of the triangle vertices ----
