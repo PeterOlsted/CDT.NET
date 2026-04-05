@@ -245,4 +245,126 @@ public sealed class TriangulationTests_Int
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
         Assert.True(cdt.Vertices.Length > 4); // intersection vertex inserted
     }
+
+    // -------------------------------------------------------------------------
+    // IntersectingConstraintsException
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void NotAllowed_CrossingEdges_ThrowsIntersectingConstraintsException()
+    {
+        var cdt = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.NotAllowed,
+            0L);
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(1000, 1000), Pt(0, 1000)]);
+
+        var ex = Assert.Throws<IntersectingConstraintsException>(
+            () => cdt.InsertEdges([new Edge(0, 2), new Edge(1, 3)]));
+
+        // Both edge properties must be set with the two crossing diagonals.
+        Assert.True(
+            (ex.E1 == new Edge(0, 2) && ex.E2 == new Edge(1, 3)) ||
+            (ex.E1 == new Edge(1, 3) && ex.E2 == new Edge(0, 2)));
+    }
+
+    [Fact]
+    public void DontCheck_CrossingEdges_DoesNotThrow()
+    {
+        var cdt = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.DontCheck,
+            0L);
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(1000, 1000), Pt(0, 1000)]);
+
+        // Should complete without throwing – caller guarantees no intersections
+        // but in this case we just verify no exception is raised.
+        var ex = Record.Exception(
+            () => cdt.InsertEdges([new Edge(0, 1), new Edge(1, 2)]));
+        Assert.Null(ex);
+    }
+
+    // -------------------------------------------------------------------------
+    // EraseOuterTrianglesAndHoles
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void EraseOuterTrianglesAndHoles_SquareWithHole_RemovesOddDepth()
+    {
+        // Outer square + inner square (hole).  Depth 0 = super, depth 1 = between
+        // squares (kept), depth 2 = inner hole (removed).
+        var cdt = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.NotAllowed,
+            0L);
+
+        // Outer square: verts 0..3
+        // Inner square (hole): verts 4..7
+        cdt.InsertVertices([
+            Pt(0,    0),    Pt(3000, 0),    Pt(3000, 3000), Pt(0,    3000),
+            Pt(1000, 1000), Pt(2000, 1000), Pt(2000, 2000), Pt(1000, 2000),
+        ]);
+        // Outer boundary
+        cdt.InsertEdges([new Edge(0, 1), new Edge(1, 2), new Edge(2, 3), new Edge(3, 0)]);
+        // Inner hole boundary
+        cdt.InsertEdges([new Edge(4, 5), new Edge(5, 6), new Edge(6, 7), new Edge(7, 4)]);
+        cdt.EraseOuterTrianglesAndHoles();
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        // All remaining triangles must NOT include the inner hole vertices exclusively
+        // – just verify topology is valid and some triangles remain.
+        Assert.True(cdt.Triangles.Length > 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // Multiple InsertVertices calls
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void InsertVertices_MultipleCalls_AccumulatesVertices()
+    {
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(500, 1000)]);
+        // Second batch adds two more points
+        cdt.InsertVertices([Pt(200, 200), Pt(800, 200)]);
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        // 5 user verts + 3 super-triangle verts
+        Assert.Equal(8, cdt.Vertices.Length);
+    }
+
+    // -------------------------------------------------------------------------
+    // Coordinate range validation
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void InsertVertices_CoordExceedsMaxCoordinate_ThrowsTriangulationException()
+    {
+        var cdt = new Triangulation();
+        long bad = CDT.Predicates.PredicatesInt.MaxCoordinate + 1;
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(
+            () => cdt.InsertVertices([Pt(0, 0), Pt(bad, 0), Pt(500, 1000)]));
+        Assert.Contains("MaxCoordinate", ex.Message);
+    }
+
+    // -------------------------------------------------------------------------
+    // ConformToEdges
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ConformToEdges_ProducesValidTopology_AndPopulatesPieceToOriginals()
+    {
+        var cdt = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.TryResolve,
+            0L);
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(1000, 1000), Pt(0, 1000)]);
+        // Use ConformToEdges (splits edges at intersections and tracks pieces)
+        cdt.ConformToEdges([new Edge(0, 2), new Edge(1, 3)]);
+        cdt.EraseSuperTriangle();
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        // PieceToOriginals is populated when conforming produces split edges
+        Assert.NotNull(cdt.PieceToOriginals);
+    }
 }

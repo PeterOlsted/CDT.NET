@@ -357,4 +357,110 @@ public class Int128Tests
 
         Assert.Equal(expected, ToBig(det));
     }
+
+    // -------------------------------------------------------------------------
+    // LessEqual / GreaterEqual operators
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Operators_LessOrEqual()
+    {
+        Int128 n1 = (Int128)(-1L);
+        Int128 z  = Int128.Zero;
+        Int128 p1 = (Int128)1L;
+
+        Assert.True(n1 <= z);
+        Assert.True(n1 <= n1);
+        Assert.True(z  <= p1);
+        Assert.False(p1 <= z);
+    }
+
+    [Fact]
+    public void Operators_GreaterOrEqual()
+    {
+        Int128 n1 = (Int128)(-1L);
+        Int128 z  = Int128.Zero;
+        Int128 p1 = (Int128)1L;
+
+        Assert.True(p1 >= z);
+        Assert.True(p1 >= p1);
+        Assert.True(z  >= n1);
+        Assert.False(n1 >= z);
+    }
+
+    // -------------------------------------------------------------------------
+    // NegativeOne and One constants
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void NegativeOne_IsMinusOne()
+    {
+        Assert.Equal(new BigInteger(-1), ToBig(Int128.NegativeOne));
+        Assert.True(Int128.NegativeOne < Int128.Zero);
+    }
+
+    [Fact]
+    public void One_IsOne()
+    {
+        Assert.Equal(new BigInteger(1), ToBig(Int128.One));
+        Assert.True(Int128.One > Int128.Zero);
+    }
+
+    // -------------------------------------------------------------------------
+    // Equals (boxed object overload) and GetHashCode
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Equals_BoxedSameValue_ReturnsTrue()
+    {
+        Int128 a = (Int128)42L;
+        object b = (Int128)42L;
+        Assert.True(a.Equals(b));
+    }
+
+    [Fact]
+    public void Equals_BoxedDifferentValue_ReturnsFalse()
+    {
+        Int128 a = (Int128)1L;
+        object b = (Int128)2L;
+        Assert.False(a.Equals(b));
+    }
+
+    [Fact]
+    public void Equals_BoxedWrongType_ReturnsFalse()
+    {
+        // Box the values explicitly so overload resolution uses Equals(object?)
+        Int128 a = (Int128)1L;
+        object boxedString = "not an Int128";
+        Assert.False(a.Equals(boxedString));
+    }
+
+    [Fact]
+    public void Equals_BoxedNull_ReturnsFalse()
+    {
+        Int128 a = (Int128)5L;
+        Assert.False(a.Equals(null));
+    }
+
+    [Fact]
+    public void GetHashCode_EqualValues_SameHash()
+    {
+        Int128 a = (Int128)12345L;
+        Int128 b = (Int128)12345L;
+        Assert.Equal(a.GetHashCode(), b.GetHashCode());
+    }
+
+#if !NET7_0_OR_GREATER
+    // -------------------------------------------------------------------------
+    // ToString (polyfill only — BCL Int128 has its own ToString)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void ToString_ContainsHexLimbs()
+    {
+        Int128 v = (Int128)255L;  // Lo=0xFF, Hi=0
+        var s = v.ToString();
+        Assert.Contains("FF", s, StringComparison.OrdinalIgnoreCase);
+    }
+#endif
 }

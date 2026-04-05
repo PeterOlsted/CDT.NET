@@ -233,4 +233,24 @@ public sealed class V2iTests
         Assert.Contains("1", s);
         Assert.Contains("4", s);
     }
+
+    // -------------------------------------------------------------------------
+    // V2i — additional equality coverage
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void V2i_EqualsObject_WrongType_ReturnsFalse()
+    {
+        var p = new V2i(1L, 2L);
+        Assert.False(p.Equals("not a V2i"));
+        Assert.False(p.Equals(42));
+    }
+
+    [Fact]
+    public void V2i_NotEqual_Operator_ReturnsTrue_WhenDifferent()
+    {
+        var a = new V2i(1L, 0L);
+        var b = new V2i(2L, 0L);
+        Assert.True(a != b);
+    }
 }
