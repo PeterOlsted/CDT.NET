@@ -18,8 +18,10 @@ internal static class BenchmarkInputReader
     /// <summary>
     /// Reads a CDT input file.
     /// Format: <c>nVerts nEdges\n x y\n … v1 v2\n …</c>
+    /// Coordinates are parsed as doubles then truncated to long to match the
+    /// integer V2i type used by CDT.Core.
     /// </summary>
-    public static (List<V2d<double>> Vertices, List<Edge> Edges) Read(string fileName)
+    public static (List<V2i> Vertices, List<Edge> Edges) Read(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "inputs", fileName);
 
@@ -31,13 +33,13 @@ internal static class BenchmarkInputReader
         int nVerts = int.Parse(header[0]);
         int nEdges = int.Parse(header[1]);
 
-        var verts = new List<V2d<double>>(nVerts);
+        var verts = new List<V2i>(nVerts);
         for (int i = 0; i < nVerts; i++)
         {
             var tok = sr.ReadLine()!.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            verts.Add(new V2d<double>(
-                double.Parse(tok[0], System.Globalization.CultureInfo.InvariantCulture),
-                double.Parse(tok[1], System.Globalization.CultureInfo.InvariantCulture)));
+            verts.Add(new V2i(
+                (long)double.Parse(tok[0], System.Globalization.CultureInfo.InvariantCulture),
+                (long)double.Parse(tok[1], System.Globalization.CultureInfo.InvariantCulture)));
         }
 
         var edges = new List<Edge>(nEdges);
@@ -66,7 +68,7 @@ internal static class BenchmarkInputReader
 [ShortRunJob]
 public class ConstrainedSwedenBenchmarks
 {
-    private List<V2d<double>> _vertices = null!;
+    private List<V2i> _vertices = null!;
     private List<Edge> _edges = null!;
 
     [GlobalSetup]
@@ -79,18 +81,18 @@ public class ConstrainedSwedenBenchmarks
 
     [Benchmark(Description = "Vertices only – AsProvided")]
     [BenchmarkCategory("VerticesOnly")]
-    public Triangulation<double> VerticesOnly_AsProvided()
+    public Triangulation VerticesOnly_AsProvided()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.AsProvided);
+        var cdt = new Triangulation(VertexInsertionOrder.AsProvided);
         cdt.InsertVertices(_vertices);
         return cdt;
     }
 
     [Benchmark(Description = "Vertices only – Auto")]
     [BenchmarkCategory("VerticesOnly")]
-    public Triangulation<double> VerticesOnly_Auto()
+    public Triangulation VerticesOnly_Auto()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto);
+        var cdt = new Triangulation(VertexInsertionOrder.Auto);
         cdt.InsertVertices(_vertices);
         return cdt;
     }
@@ -99,9 +101,9 @@ public class ConstrainedSwedenBenchmarks
 
     [Benchmark(Description = "Constrained – AsProvided")]
     [BenchmarkCategory("Constrained")]
-    public Triangulation<double> Constrained_AsProvided()
+    public Triangulation Constrained_AsProvided()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.AsProvided);
+        var cdt = new Triangulation(VertexInsertionOrder.AsProvided);
         cdt.InsertVertices(_vertices);
         cdt.InsertEdges(_edges);
         return cdt;
@@ -109,9 +111,9 @@ public class ConstrainedSwedenBenchmarks
 
     [Benchmark(Description = "Constrained – Auto")]
     [BenchmarkCategory("Constrained")]
-    public Triangulation<double> Constrained_Auto()
+    public Triangulation Constrained_Auto()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto);
+        var cdt = new Triangulation(VertexInsertionOrder.Auto);
         cdt.InsertVertices(_vertices);
         cdt.InsertEdges(_edges);
         return cdt;
@@ -121,9 +123,9 @@ public class ConstrainedSwedenBenchmarks
 
     [Benchmark(Description = "Conforming – Auto")]
     [BenchmarkCategory("Conforming")]
-    public Triangulation<double> Conforming_Auto()
+    public Triangulation Conforming_Auto()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto);
+        var cdt = new Triangulation(VertexInsertionOrder.Auto);
         cdt.InsertVertices(_vertices);
         cdt.ConformToEdges(_edges);
         return cdt;
@@ -131,9 +133,9 @@ public class ConstrainedSwedenBenchmarks
 
     [Benchmark(Description = "Conforming – AsProvided")]
     [BenchmarkCategory("Conforming")]
-    public Triangulation<double> Conforming_AsProvided()
+    public Triangulation Conforming_AsProvided()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.AsProvided);
+        var cdt = new Triangulation(VertexInsertionOrder.AsProvided);
         cdt.InsertVertices(_vertices);
         cdt.ConformToEdges(_edges);
         return cdt;
@@ -143,10 +145,10 @@ public class ConstrainedSwedenBenchmarks
 
     [Benchmark(Description = "Full pipeline – Auto")]
     [BenchmarkCategory("FullPipeline")]
-    public Triangulation<double> FullPipeline_Auto()
+    public Triangulation FullPipeline_Auto()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto,
-            IntersectingConstraintEdges.TryResolve, 0.0);
+        var cdt = new Triangulation(VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.TryResolve, 0L);
         cdt.InsertVertices(_vertices);
         cdt.InsertEdges(_edges);
         cdt.EraseOuterTrianglesAndHoles();
@@ -157,9 +159,9 @@ public class ConstrainedSwedenBenchmarks
 
     [Benchmark(Description = "EraseSuperTriangle – Auto")]
     [BenchmarkCategory("Finalization")]
-    public Triangulation<double> EraseSuperTriangle_Auto()
+    public Triangulation EraseSuperTriangle_Auto()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto);
+        var cdt = new Triangulation(VertexInsertionOrder.Auto);
         cdt.InsertVertices(_vertices);
         cdt.InsertEdges(_edges);
         cdt.EraseSuperTriangle();
@@ -168,9 +170,9 @@ public class ConstrainedSwedenBenchmarks
 
     [Benchmark(Description = "EraseOuterTriangles – Auto")]
     [BenchmarkCategory("Finalization")]
-    public Triangulation<double> EraseOuterTriangles_Auto()
+    public Triangulation EraseOuterTriangles_Auto()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto);
+        var cdt = new Triangulation(VertexInsertionOrder.Auto);
         cdt.InsertVertices(_vertices);
         cdt.InsertEdges(_edges);
         cdt.EraseOuterTriangles();
@@ -193,7 +195,7 @@ public class ConstrainedSwedenBenchmarks
 [ShortRunJob]
 public class SmallDatasetBenchmarks
 {
-    private List<V2d<double>> _vertices = null!;
+    private List<V2i> _vertices = null!;
     private List<Edge> _edges = null!;
 
     [GlobalSetup]
@@ -204,9 +206,9 @@ public class SmallDatasetBenchmarks
 
     [Benchmark(Description = "Small – Constrained Auto")]
     [BenchmarkCategory("Small")]
-    public Triangulation<double> Small_Constrained_Auto()
+    public Triangulation Small_Constrained_Auto()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto);
+        var cdt = new Triangulation(VertexInsertionOrder.Auto);
         cdt.InsertVertices(_vertices);
         cdt.InsertEdges(_edges);
         return cdt;
@@ -214,41 +216,19 @@ public class SmallDatasetBenchmarks
 
     [Benchmark(Description = "Small – Constrained AsProvided")]
     [BenchmarkCategory("Small")]
-    public Triangulation<double> Small_Constrained_AsProvided()
+    public Triangulation Small_Constrained_AsProvided()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.AsProvided);
+        var cdt = new Triangulation(VertexInsertionOrder.AsProvided);
         cdt.InsertVertices(_vertices);
         cdt.InsertEdges(_edges);
-        return cdt;
-    }
-
-    [Benchmark(Description = "Small – float vs double: double Auto")]
-    [BenchmarkCategory("FloatVsDouble")]
-    public Triangulation<double> FloatVsDouble_Double()
-    {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto);
-        cdt.InsertVertices(_vertices);
-        cdt.InsertEdges(_edges);
-        return cdt;
-    }
-
-    [Benchmark(Description = "Small – float vs double: float Auto")]
-    [BenchmarkCategory("FloatVsDouble")]
-    public Triangulation<float> FloatVsDouble_Float()
-    {
-        var vf = _vertices.Select(v => new V2d<float>((float)v.X, (float)v.Y)).ToList();
-        var ef = _edges;
-        var cdt = new Triangulation<float>(VertexInsertionOrder.Auto);
-        cdt.InsertVertices(vf);
-        cdt.InsertEdges(ef);
         return cdt;
     }
 
     [Benchmark(Description = "Small – Conforming Auto")]
     [BenchmarkCategory("SmallConforming")]
-    public Triangulation<double> Small_Conforming_Auto()
+    public Triangulation Small_Conforming_Auto()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto);
+        var cdt = new Triangulation(VertexInsertionOrder.Auto);
         cdt.InsertVertices(_vertices);
         cdt.ConformToEdges(_edges);
         return cdt;
@@ -256,9 +236,9 @@ public class SmallDatasetBenchmarks
 
     [Benchmark(Description = "Small – EraseSuperTriangle Auto")]
     [BenchmarkCategory("SmallFinalization")]
-    public Triangulation<double> Small_EraseSuperTriangle_Auto()
+    public Triangulation Small_EraseSuperTriangle_Auto()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto);
+        var cdt = new Triangulation(VertexInsertionOrder.Auto);
         cdt.InsertVertices(_vertices);
         cdt.InsertEdges(_edges);
         cdt.EraseSuperTriangle();
@@ -267,10 +247,10 @@ public class SmallDatasetBenchmarks
 
     [Benchmark(Description = "Small – EraseOuterTrianglesAndHoles Auto")]
     [BenchmarkCategory("SmallFinalization")]
-    public Triangulation<double> Small_EraseOuterTrianglesAndHoles_Auto()
+    public Triangulation Small_EraseOuterTrianglesAndHoles_Auto()
     {
-        var cdt = new Triangulation<double>(VertexInsertionOrder.Auto,
-            IntersectingConstraintEdges.TryResolve, 0.0);
+        var cdt = new Triangulation(VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.TryResolve, 0L);
         cdt.InsertVertices(_vertices);
         cdt.InsertEdges(_edges);
         cdt.EraseOuterTrianglesAndHoles();

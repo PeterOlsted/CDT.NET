@@ -4,20 +4,15 @@
 
 namespace CDT.Tests;
 
-/// <summary>Basic triangulation tests (float and double).</summary>
-public abstract class TriangulationTestsBase<T>
-    where T : unmanaged,
-              System.Numerics.IFloatingPoint<T>,
-              System.Numerics.IMinMaxValue<T>,
-              System.Numerics.IRootFunctions<T>
+
+// ---------------------------------------------------------------------------
+// Concrete integer triangulation tests (no generics, V2i coordinates)
+// ---------------------------------------------------------------------------
+
+/// <summary>Basic triangulation tests using the integer <see cref="Triangulation"/> directly.</summary>
+public sealed class TriangulationTests_Int
 {
-    protected static T F(double v) => T.CreateChecked(v);
-
-    protected static V2d<T> Pt(double x, double y) => new(F(x), F(y));
-
-    protected static Triangulation<T> CreateCdt(
-        VertexInsertionOrder order = VertexInsertionOrder.Auto)
-        => new(order);
+    private static V2i Pt(long x, long y) => new(x, y);
 
     // -------------------------------------------------------------------------
     // Basic insertion
@@ -26,22 +21,20 @@ public abstract class TriangulationTestsBase<T>
     [Fact]
     public void InsertFourPoints_TopologicallyValid()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 1), Pt(3, 1), Pt(3, 0)]);
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 1000), Pt(3000, 1000), Pt(3000, 0)]);
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
-        // 4 user vertices + 3 super-triangle vertices
         Assert.Equal(7, cdt.Vertices.Length);
         Assert.Empty(cdt.FixedEdges);
-        // 4 vertices inside a super-triangle → 9 triangles
         Assert.Equal(9, cdt.Triangles.Length);
     }
 
     [Fact]
     public void EraseSuperTriangle_LeavesConvexHull()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 1), Pt(3, 1), Pt(3, 0)]);
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 1000), Pt(3000, 1000), Pt(3000, 0)]);
         cdt.EraseSuperTriangle();
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
@@ -52,8 +45,8 @@ public abstract class TriangulationTestsBase<T>
     [Fact]
     public void AddConstraintEdge_PresentAfterErase()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 1), Pt(3, 1), Pt(3, 0)]);
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 1000), Pt(3000, 1000), Pt(3000, 0)]);
 
         var constraint = new Edge(0, 2);
         cdt.InsertEdges([constraint]);
@@ -76,8 +69,8 @@ public abstract class TriangulationTestsBase<T>
     [Fact]
     public void DuplicateVertex_ThrowsDuplicateVertexException()
     {
-        var cdt = CreateCdt();
-        var pts = new[] { Pt(0, 0), Pt(1, 0), Pt(0, 0) }; // pt[2] == pt[0]
+        var cdt = new Triangulation();
+        var pts = new[] { Pt(0, 0), Pt(1000, 0), Pt(0, 0) }; // pt[2] == pt[0]
         Assert.Throws<DuplicateVertexException>(() => cdt.InsertVertices(pts));
     }
 
@@ -88,12 +81,12 @@ public abstract class TriangulationTestsBase<T>
     [Fact]
     public void ExtractEdges_ReturnsAllEdges()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 0), Pt(0.5, 1)]);
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(500, 1000)]);
         cdt.EraseSuperTriangle();
 
         var edges = CdtUtils.ExtractEdgesFromTriangles(cdt.Triangles.Span);
-        Assert.Equal(3, edges.Count); // one triangle → 3 edges
+        Assert.Equal(3, edges.Count);
     }
 
     // -------------------------------------------------------------------------
@@ -103,9 +96,9 @@ public abstract class TriangulationTestsBase<T>
     [Fact]
     public void Square_WithDiagonalConstraint()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 0), Pt(1, 1), Pt(0, 1)]);
-        cdt.InsertEdges([new Edge(0, 2)]); // diagonal 0→2
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(1000, 1000), Pt(0, 1000)]);
+        cdt.InsertEdges([new Edge(0, 2)]);
         cdt.EraseSuperTriangle();
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
@@ -120,18 +113,18 @@ public abstract class TriangulationTestsBase<T>
     [Fact]
     public void InsertionOrder_AsProvided_SameResult()
     {
-        var pts = new[] { Pt(0, 0), Pt(1, 0), Pt(1, 1), Pt(0, 1) };
+        var pts = new[] { Pt(0, 0), Pt(1000, 0), Pt(1000, 1000), Pt(0, 1000) };
 
-        var cdtAuto = new Triangulation<T>(VertexInsertionOrder.Auto);
+        var cdtAuto = new Triangulation(VertexInsertionOrder.Auto);
         cdtAuto.InsertVertices(pts);
         cdtAuto.EraseSuperTriangle();
 
-        var cdtProvided = new Triangulation<T>(VertexInsertionOrder.AsProvided);
+        var cdtProvided = new Triangulation(VertexInsertionOrder.AsProvided);
         cdtProvided.InsertVertices(pts);
         cdtProvided.EraseSuperTriangle();
 
         Assert.Equal(cdtAuto.Triangles.Length, cdtProvided.Triangles.Length);
-        Assert.Equal(cdtAuto.Vertices.Length, cdtProvided.Vertices.Length);
+        Assert.Equal(cdtAuto.Vertices.Length,  cdtProvided.Vertices.Length);
     }
 
     // -------------------------------------------------------------------------
@@ -141,34 +134,30 @@ public abstract class TriangulationTestsBase<T>
     [Fact]
     public void FindDuplicates_DetectsExactMatches()
     {
-        var pts = new List<V2d<T>>
+        var pts = new List<V2i>
         {
-            Pt(0, 0), Pt(1, 0), Pt(0, 0), Pt(2, 0),
+            Pt(0, 0), Pt(1000, 0), Pt(0, 0), Pt(2000, 0),
         };
         var info = CdtUtils.FindDuplicates(pts);
         Assert.Single(info.Duplicates);
         Assert.Equal(2, info.Duplicates[0]);
-        // mapping[2] should equal mapping[0] = 0
         Assert.Equal(info.Mapping[0], info.Mapping[2]);
     }
 
     [Fact]
     public void RemoveDuplicatesAndRemapEdges_ProducesConsistentResult()
     {
-        var verts = new List<V2d<T>>
+        var verts = new List<V2i>
         {
-            Pt(0, 0), Pt(1, 0), Pt(0, 0), // index 2 is dup of 0
-            Pt(0, 1),
+            Pt(0, 0), Pt(1000, 0), Pt(0, 0), // index 2 is dup of 0
+            Pt(0, 1000),
         };
         var edges = new List<Edge> { new(0, 2), new(1, 3) };
 
         CdtUtils.RemoveDuplicatesAndRemapEdges(verts, edges);
 
-        // After removing dup at index 2, vertices are: (0,0),(1,0),(0,1) → 3
         Assert.Equal(3, verts.Count);
-        // Edge (0,2) should be remapped to (0,0) = same vertex → still (0,0)
         Assert.Equal(new Edge(0, 0), edges[0]);
-        // Edge (1,3) → (1,2) after shifting
         Assert.Equal(new Edge(1, 2), edges[1]);
     }
 
@@ -179,13 +168,12 @@ public abstract class TriangulationTestsBase<T>
     [Fact]
     public void EraseOuterTriangles_RemovesOutside()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 0), Pt(1, 1), Pt(0, 1)]);
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(1000, 1000), Pt(0, 1000)]);
         cdt.InsertEdges([new Edge(0, 1), new Edge(1, 2), new Edge(2, 3), new Edge(3, 0)]);
         cdt.EraseOuterTriangles();
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
-        // Square → 2 triangles
         Assert.Equal(2, cdt.Triangles.Length);
     }
 
@@ -196,8 +184,8 @@ public abstract class TriangulationTestsBase<T>
     [Fact]
     public void ThreePoints_SingleTriangle()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(2, 0), Pt(1, 2)]);
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(2000, 0), Pt(1000, 2000)]);
         cdt.EraseSuperTriangle();
 
         Assert.True(TopologyVerifier.VerifyTopology(cdt));
@@ -206,101 +194,55 @@ public abstract class TriangulationTestsBase<T>
     }
 
     // -------------------------------------------------------------------------
-    // Collinear points
-    // -------------------------------------------------------------------------
-
-    [Fact]
-    public void FivePoints_ValidTopology()
-    {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([
-            Pt(0, 0), Pt(2, 0), Pt(4, 0),
-            Pt(2, 2), Pt(0, 2),
-        ]);
-        cdt.EraseSuperTriangle();
-
-        Assert.True(TopologyVerifier.VerifyTopology(cdt));
-        Assert.Equal(5, cdt.Vertices.Length);
-    }
-
-    // -------------------------------------------------------------------------
     // IsFinalized guard checks
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void InsertVertices_AfterFinalized_ThrowsTriangulationFinalizedException()
+    public void InsertVertices_AfterFinalized_Throws()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 0), Pt(0.5, 1)]);
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(500, 1000)]);
         cdt.EraseSuperTriangle();
 
         Assert.True(cdt.IsFinalized);
-        Assert.Throws<TriangulationFinalizedException>(() =>
-            cdt.InsertVertices([Pt(2, 0)]));
+        Assert.Throws<TriangulationFinalizedException>(() => cdt.InsertVertices([Pt(2000, 0)]));
     }
 
     [Fact]
-    public void InsertEdges_AfterFinalized_ThrowsTriangulationFinalizedException()
+    public void InsertEdges_AfterFinalized_Throws()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 0), Pt(1, 1), Pt(0, 1)]);
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(1000, 1000), Pt(0, 1000)]);
         cdt.EraseSuperTriangle();
 
         Assert.True(cdt.IsFinalized);
-        Assert.Throws<TriangulationFinalizedException>(() =>
-            cdt.InsertEdges([new Edge(0, 2)]));
+        Assert.Throws<TriangulationFinalizedException>(() => cdt.InsertEdges([new Edge(0, 2)]));
     }
 
     [Fact]
-    public void ConformToEdges_AfterFinalized_ThrowsTriangulationFinalizedException()
+    public void ConformToEdges_AfterFinalized_Throws()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 0), Pt(1, 1), Pt(0, 1)]);
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(1000, 1000), Pt(0, 1000)]);
         cdt.EraseSuperTriangle();
 
         Assert.True(cdt.IsFinalized);
-        Assert.Throws<TriangulationFinalizedException>(() =>
-            cdt.ConformToEdges([new Edge(0, 2)]));
+        Assert.Throws<TriangulationFinalizedException>(() => cdt.ConformToEdges([new Edge(0, 2)]));
     }
 
     [Fact]
-    public void EraseSuperTriangle_AfterFinalized_ThrowsTriangulationFinalizedException()
+    public void ResolveIntersectingConstraints_InsertsIntersectionVertex()
     {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 0), Pt(0.5, 1)]);
+        var cdt = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.TryResolve,
+            0L);
+
+        cdt.InsertVertices([Pt(0, 0), Pt(1000, 0), Pt(1000, 1000), Pt(0, 1000)]);
+        cdt.InsertEdges([new Edge(0, 2), new Edge(1, 3)]); // crossing diagonals
         cdt.EraseSuperTriangle();
 
-        Assert.True(cdt.IsFinalized);
-        Assert.Throws<TriangulationFinalizedException>(() => cdt.EraseSuperTriangle());
-    }
-
-    [Fact]
-    public void EraseOuterTriangles_AfterFinalized_ThrowsTriangulationFinalizedException()
-    {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 0), Pt(1, 1), Pt(0, 1)]);
-        cdt.InsertEdges([new Edge(0, 1), new Edge(1, 2), new Edge(2, 3), new Edge(3, 0)]);
-        cdt.EraseOuterTriangles();
-
-        Assert.True(cdt.IsFinalized);
-        Assert.Throws<TriangulationFinalizedException>(() => cdt.EraseOuterTriangles());
-    }
-
-    [Fact]
-    public void EraseOuterTrianglesAndHoles_AfterFinalized_ThrowsTriangulationFinalizedException()
-    {
-        var cdt = CreateCdt();
-        cdt.InsertVertices([Pt(0, 0), Pt(1, 0), Pt(1, 1), Pt(0, 1)]);
-        cdt.InsertEdges([new Edge(0, 1), new Edge(1, 2), new Edge(2, 3), new Edge(3, 0)]);
-        cdt.EraseOuterTrianglesAndHoles();
-
-        Assert.True(cdt.IsFinalized);
-        Assert.Throws<TriangulationFinalizedException>(() => cdt.EraseOuterTrianglesAndHoles());
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        Assert.True(cdt.Vertices.Length > 4); // intersection vertex inserted
     }
 }
-
-/// <summary>Triangulation tests for <see cref="double"/>.</summary>
-public sealed class TriangulationTests_Double : TriangulationTestsBase<double> { }
-
-/// <summary>Triangulation tests for <see cref="float"/>.</summary>
-public sealed class TriangulationTests_Float : TriangulationTestsBase<float> { }

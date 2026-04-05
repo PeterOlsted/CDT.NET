@@ -19,7 +19,7 @@ internal sealed class TriangulationVisual : FrameworkElement
     // -----------------------------------------------------------------------
     // Rendering data – set by MainWindow, then InvalidateVisual() is called
     // -----------------------------------------------------------------------
-    public List<V2d<double>> Vertices { get; set; } = [];
+    public List<V2i> Vertices { get; set; } = [];
     public List<Triangle> Triangles { get; set; } = [];
     public HashSet<Edge> FixedEdges { get; set; } = [];
     public bool ShowSuperTriangle { get; set; }   // DontFinalize mode
@@ -61,7 +61,7 @@ internal sealed class TriangulationVisual : FrameworkElement
     // -----------------------------------------------------------------------
     // Scene ↔ screen coordinate helpers
     // -----------------------------------------------------------------------
-    public Point SceneToScreen(V2d<double> v)
+    public Point SceneToScreen(V2i v)
     {
         double cx = ActualWidth / 2.0;
         double cy = ActualHeight / 2.0;
@@ -70,13 +70,14 @@ internal sealed class TriangulationVisual : FrameworkElement
            -Scale * v.Y + cy + Translation.Y);
     }
 
-    public V2d<double> ScreenToScene(Point pt)
+    // Returns double coords for display purposes only (coordinate readout label)
+    public (double X, double Y) ScreenToScene(Point pt)
     {
         double cx = ActualWidth / 2.0;
         double cy = ActualHeight / 2.0;
         double sx = (pt.X - Translation.X - cx) / Scale;
         double sy = -(pt.Y - Translation.Y - cy) / Scale;
-        return new V2d<double>(sx, sy);
+        return (sx, sy);
     }
 
     // -----------------------------------------------------------------------
@@ -153,7 +154,7 @@ internal sealed class TriangulationVisual : FrameworkElement
         }
     }
 
-    private Point Centroid(V2d<double> a, V2d<double> b, V2d<double> c)
+    private Point Centroid(V2i a, V2i b, V2i c)
     {
         var pa = SceneToScreen(a);
         var pb = SceneToScreen(b);
@@ -161,7 +162,7 @@ internal sealed class TriangulationVisual : FrameworkElement
         return new Point((pa.X + pb.X + pc.X) / 3, (pa.Y + pb.Y + pc.Y) / 3);
     }
 
-    private void DrawLabel(DrawingContext dc, string text, V2d<double> v, Brush brush, double size)
+    private void DrawLabel(DrawingContext dc, string text, V2i v, Brush brush, double size)
         => DrawLabel(dc, text, SceneToScreen(v), brush, size);
 
     private void DrawLabel(DrawingContext dc, string text, Point pt, Brush brush, double size)
@@ -179,9 +180,9 @@ public partial class MainWindow : Window
     // -----------------------------------------------------------------------
     // Fields
     // -----------------------------------------------------------------------
-    private List<V2d<double>> _loadedPoints = [];
+    private List<V2i> _loadedPoints = [];
     private List<Edge> _loadedEdges = [];
-    private Triangulation<double>? _cdt;
+    private Triangulation? _cdt;
 
     private readonly TriangulationVisual _visual = new();
 
@@ -256,8 +257,11 @@ public partial class MainWindow : Window
     {
         if (!int.TryParse(RandomCount.Text, out int n) || n <= 0) n = 100;
         var rng = new Random();
+        // Scale to integer coordinates in range [-100000, 100000]
         _loadedPoints = Enumerable.Range(0, n)
-            .Select(_ => new V2d<double>(rng.NextDouble() * 200 - 100, rng.NextDouble() * 200 - 100))
+            .Select(_ => new V2i(
+                (long)(rng.NextDouble() * 200_000 - 100_000),
+                (long)(rng.NextDouble() * 200_000 - 100_000)))
             .ToList();
         _loadedEdges = [];
         FileList.SelectionChanged -= FileList_SelectionChanged;
@@ -329,19 +333,19 @@ public partial class MainWindow : Window
         }
     }
 
-    private static (List<V2d<double>> pts, List<Edge> edges) ReadInput(string path)
+    private static (List<V2i> pts, List<Edge> edges) ReadInput(string path)
     {
         using var sr = new StreamReader(path);
         var first = sr.ReadLine()!.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         int nPts = int.Parse(first[0]);
         int nEdges = int.Parse(first[1]);
-        var pts = new List<V2d<double>>(nPts);
+        var pts = new List<V2i>(nPts);
         for (int i = 0; i < nPts; i++)
         {
             var tok = sr.ReadLine()!.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            pts.Add(new V2d<double>(
-                double.Parse(tok[0], CultureInfo.InvariantCulture),
-                double.Parse(tok[1], CultureInfo.InvariantCulture)));
+            pts.Add(new V2i(
+                (long)double.Parse(tok[0], CultureInfo.InvariantCulture),
+                (long)double.Parse(tok[1], CultureInfo.InvariantCulture)));
         }
         var edges = new List<Edge>(nEdges);
         for (int i = 0; i < nEdges; i++)
@@ -409,15 +413,15 @@ public partial class MainWindow : Window
         var strategy = IntersectingEdges.SelectedIndex == 1
             ? IntersectingConstraintEdges.NotAllowed
             : IntersectingConstraintEdges.TryResolve;
-        double minDist = double.TryParse(MinDist.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double md) ? md : 1e-6;
+        long snapTolerance = long.TryParse(MinDist.Text, out long st) ? st : 0L;
         bool fixDups = FixDuplicates.IsChecked == true;
         bool conforming = TriangulationType.SelectedIndex == 1;
 
-        _cdt = new Triangulation<double>(order, strategy, minDist);
+        _cdt = new Triangulation(order, strategy, snapTolerance);
 
         try
         {
-            var workPts = new List<V2d<double>>(pts);
+            var workPts = new List<V2i>(pts);
 
             List<Edge> workEdges;
             if (fixDups)
@@ -479,8 +483,8 @@ public partial class MainWindow : Window
     {
         if (_loadedPoints.Count == 0) return;
 
-        double minX = _loadedPoints.Min(v => v.X), maxX = _loadedPoints.Max(v => v.X);
-        double minY = _loadedPoints.Min(v => v.Y), maxY = _loadedPoints.Max(v => v.Y);
+        double minX = _loadedPoints.Min(v => (double)v.X), maxX = _loadedPoints.Max(v => (double)v.X);
+        double minY = _loadedPoints.Min(v => (double)v.Y), maxY = _loadedPoints.Max(v => (double)v.Y);
         double cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
         double dx = maxX - minX, dy = maxY - minY;
         if (dx == 0) dx = 1;
@@ -506,7 +510,6 @@ public partial class MainWindow : Window
         var pos = e.GetPosition(_visual);
 
         // Zoom toward mouse cursor
-        double oldScale = _visual.Scale;
         _visual.Scale *= factor;
 
         double cx = _visual.ActualWidth / 2.0;
@@ -547,8 +550,8 @@ public partial class MainWindow : Window
 
     private void UpdateCoordLabel(Point screenPt)
     {
-        var scene = _visual.ScreenToScene(screenPt);
-        CoordLabel.Text = FormattableString.Invariant($"x={scene.X:F4}  y={scene.Y:F4}");
+        var (sx, sy) = _visual.ScreenToScene(screenPt);
+        CoordLabel.Text = FormattableString.Invariant($"x={sx:F4}  y={sy:F4}");
     }
 
     // -----------------------------------------------------------------------
