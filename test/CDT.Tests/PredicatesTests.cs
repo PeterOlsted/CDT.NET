@@ -48,9 +48,8 @@ public sealed class PredicatesTests
     }
 }
 
-#if NET7_0_OR_GREATER
-/// <summary>Tests for triangle utils.</summary>
-public sealed class TriangleUtilsTests
+/// <summary>Tests for CdtUtils index-cycling helpers (available on all TFMs).</summary>
+public sealed class TriangleIndexTests
 {
     [Theory]
     [InlineData(0, 1)]
@@ -65,7 +64,12 @@ public sealed class TriangleUtilsTests
     [InlineData(2, 1)]
     public void Cw_CyclesBackward(int i, int expected)
         => Assert.Equal(expected, CdtUtils.Cw(i));
+}
 
+#if NET7_0_OR_GREATER
+/// <summary>Tests for triangle utils.</summary>
+public sealed class TriangleUtilsTests
+{
     [Fact]
     public void LocatePointTriangle_Inside()
     {

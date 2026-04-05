@@ -1204,4 +1204,28 @@ public sealed class IntegerRegressionTests
         Assert.Equal(2, kd.Nearest(9L, 9L, pts));
         Assert.Equal(3, kd.Nearest(1L, 9L, pts));
     }
+
+    [Fact]
+    public void Integer_InsertVertexOnFixedEdge()
+    {
+        // Integer equivalent of RegressionTests.Issue204_InsertVertexOnFixedEdge:
+        // insert a second batch of vertices where one falls on a fixed edge.
+        var cdt = new Triangulation(
+            VertexInsertionOrder.Auto,
+            IntersectingConstraintEdges.NotAllowed,
+            0L);
+
+        cdt.InsertVertices([
+            new V2i(0, 0),
+            new V2i(2_000_000, 0),
+            new V2i(2_000_000, 2_000_000),
+            new V2i(0, 2_000_000),
+        ]);
+        cdt.InsertEdges([new Edge(0, 2)]); // diagonal
+
+        // Insert a point at the midpoint of the diagonal (on fixed edge 0-2)
+        cdt.InsertVertices([new V2i(1_000_000, 1_000_000)]);
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+    }
 }
