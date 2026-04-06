@@ -450,6 +450,18 @@ public class Int128Tests
         Assert.Equal(a.GetHashCode(), b.GetHashCode());
     }
 
+    // -------------------------------------------------------------------------
+    // MinValue negation (two's-complement boundary)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Negate_MinValue_OverflowsToMinValue()
+    {
+        // -MinValue overflows in two's complement on both BCL and polyfill:
+        // ~0x8000…00 + 1 = 0x7FFF…FF + 1 = 0x8000…00 = MinValue.
+        Assert.Equal(Int128.MinValue, -Int128.MinValue);
+    }
+
 #if !NET7_0_OR_GREATER
     // -------------------------------------------------------------------------
     // ToString (polyfill only — BCL Int128 has its own ToString)

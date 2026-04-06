@@ -253,4 +253,19 @@ public sealed class V2iTests
         var b = new V2i(2L, 0L);
         Assert.True(a != b);
     }
+
+    // -------------------------------------------------------------------------
+    // Box2i at MaxCoordinate boundary
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Box2i_Envelop_AtMaxCoordinate_CorrectBounds()
+    {
+        long M = CDT.Predicates.PredicatesInt.MaxCoordinate;
+        var box = new Box2i();
+        box.Envelop(-M, -M);
+        box.Envelop( M,  M);
+        Assert.Equal(new V2i(-M, -M), box.Min);
+        Assert.Equal(new V2i( M,  M), box.Max);
+    }
 }

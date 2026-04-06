@@ -367,4 +367,53 @@ public sealed class TriangulationTests_Int
         // PieceToOriginals is populated when conforming produces split edges
         Assert.NotNull(cdt.PieceToOriginals);
     }
+
+    // -------------------------------------------------------------------------
+    // Large-coordinate boundary tests
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void InsertVertices_LargePositiveCoords_ProducesValidTopology()
+    {
+        // Vertices at up to 2^50 in the positive quadrant.
+        // Super-triangle R = 4 * C = 4*(2^49) = 2^51 < (long)9e15, so the
+        // Debug.Assert inside AddSuperTriangle is satisfied.
+        const long L = 1L << 50;
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(0, 0), Pt(L, 0), Pt(L, L), Pt(0, L)]);
+        cdt.EraseSuperTriangle();
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        Assert.Equal(4, cdt.Vertices.Length);
+        Assert.Equal(2, cdt.Triangles.Length);
+    }
+
+    [Fact]
+    public void InsertVertices_LargeSymmetricCoords_ProducesValidTopology()
+    {
+        // Symmetric about origin: ±(2^49) on both axes.
+        // R = 8*(2^49) = 2^52 ≈ 4.5e15 < (long)9e15. Safe.
+        const long H = 1L << 49;
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(-H, -H), Pt(H, -H), Pt(H, H), Pt(-H, H)]);
+        cdt.EraseSuperTriangle();
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        Assert.Equal(4, cdt.Vertices.Length);
+        Assert.Equal(2, cdt.Triangles.Length);
+    }
+
+    [Fact]
+    public void InsertVertices_LargeCoords_WithConstraintEdge_ProducesValidTopology()
+    {
+        // Constraint edge across a large-coordinate square.
+        const long H = 1L << 49;
+        var cdt = new Triangulation();
+        cdt.InsertVertices([Pt(-H, -H), Pt(H, -H), Pt(H, H), Pt(-H, H)]);
+        cdt.InsertEdges([new Edge(0, 2)]); // diagonal
+        cdt.EraseSuperTriangle();
+
+        Assert.True(TopologyVerifier.VerifyTopology(cdt));
+        Assert.Single(cdt.FixedEdges);
+    }
 }
