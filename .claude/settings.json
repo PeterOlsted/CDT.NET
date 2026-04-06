@@ -7,7 +7,12 @@
       "Bash(git add:*)",
       "Bash(git commit -m ':*)",
       "Bash(git branch:*)",
-      "Bash(ls /opt/UnitySrc/Projects/CDT.NET/*.md /opt/UnitySrc/Projects/CDT.NET/LICENSE)"
+      "Bash(ls /opt/UnitySrc/Projects/CDT.NET/*.md /opt/UnitySrc/Projects/CDT.NET/LICENSE)",
+      "Bash(ls /opt/UnitySrc/Projects/CDT.NET/*.slnx)",
+      "Bash(dotnet test:*)",
+      "Bash(ls /opt/UnitySrc/Projects/CDT.NET/test/CDT.Tests/*.cs)",
+      "Bash(dotnet clean:*)",
+      "Bash(dotnet build:*)"
     ]
   }
 }

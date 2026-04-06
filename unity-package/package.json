@@ -1,0 +1,8 @@
+{
+  "name": "com.unitycdt",
+  "version": "1.0.0",
+  "displayName": "UnityCDT",
+  "description": "Constrained Delaunay Triangulation with exact 64-bit integer arithmetic. Unity-compatible, no engine dependencies.",
+  "unity": "6000.3",
+  "dependencies": {}
+}

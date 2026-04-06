@@ -18,7 +18,7 @@
 
   <!-- CDT.NET (baseline) -->
   <ItemGroup>
-    <ProjectReference Include="..\..\src\CDT.Core\CDT.Core.csproj" />
+    <ProjectReference Include="..\..\src\UnityCDT.csproj" />
   </ItemGroup>
 
   <ItemGroup>
