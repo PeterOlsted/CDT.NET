@@ -15,10 +15,14 @@ public static partial class TopologyVerifier
     /// </summary>
     /// <returns>true if topology is valid.</returns>
     public static bool VerifyTopology(Triangulation cdt)
-    {
-        var triangles = cdt.Triangles.Span;
-        var vertices  = cdt.Vertices.Span;
+        => VerifyTopology(cdt.Triangles.Span, cdt.Vertices.Span);
 
+    /// <summary>
+    /// Verifies the topological consistency of raw triangle and vertex arrays.
+    /// Exposed internally for unit-testing error branches with hand-crafted bad topology.
+    /// </summary>
+    internal static bool VerifyTopology(ReadOnlySpan<Triangle> triangles, ReadOnlySpan<V2i> vertices)
+    {
         for (int iT = 0; iT < triangles.Length; iT++)
         {
             var t = triangles[iT];
