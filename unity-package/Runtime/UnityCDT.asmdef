@@ -1,5 +1,5 @@
 {
-    "name": "CDT.Core",
+    "name": "UnityCDT",
     "rootNamespace": "CDT",
     "references": [],
     "includePlatforms": [],

@@ -8,13 +8,13 @@
     <Optimize>true</Optimize>
     <LangVersion>preview</LangVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <AssemblyName>CDT.Core</AssemblyName>
+    <AssemblyName>UnityCDT</AssemblyName>
     <RootNamespace>CDT</RootNamespace>
   </PropertyGroup>
 
   <!-- NuGet Package Metadata -->
   <PropertyGroup>
-    <PackageId>CDT.NET</PackageId>
+    <PackageId>UnityCDT</PackageId>
     <VersionPrefix>1.0.0</VersionPrefix>
     <Authors>Michael Conrad</Authors>
     <Copyright>Copyright © 2026 Michael Conrad</Copyright>
