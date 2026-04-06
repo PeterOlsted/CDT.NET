@@ -4,6 +4,8 @@
 // Contribution of original implementation:
 // Andre Fecteau <andre.fecteau1@gmail.com>
 
+using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using CDT.Predicates;

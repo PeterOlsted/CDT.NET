@@ -2,6 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using CDT.Predicates;
 using static CDT.CdtUtils;
@@ -88,11 +91,13 @@ internal static class DictionaryExtensions
 /// Provides a covariant read-only view over a <see cref="Dictionary{TKey,TInner}"/>
 /// where <typeparamref name="TInner"/> is assignable to <typeparamref name="TOuter"/>.
 /// </summary>
-internal sealed class CovariantReadOnlyDictionary<TKey, TInner, TOuter>(Dictionary<TKey, TInner> inner)
+internal sealed class CovariantReadOnlyDictionary<TKey, TInner, TOuter>
     : IReadOnlyDictionary<TKey, TOuter>
     where TKey : notnull
     where TInner : TOuter
 {
+    private readonly Dictionary<TKey, TInner> inner;
+    public CovariantReadOnlyDictionary(Dictionary<TKey, TInner> inner) { this.inner = inner; }
     public TOuter this[TKey key] => inner[key];
     public IEnumerable<TKey> Keys => inner.Keys;
     public IEnumerable<TOuter> Values => inner.Values.Cast<TOuter>();
@@ -136,7 +141,11 @@ public sealed class Triangulation
     /// <remarks>Backed by a <see cref="System.Collections.Generic.HashSet{T}"/>.
     /// Iteration order is not deterministic and must not be relied upon.
     /// Use <c>Contains</c> for membership tests.</remarks>
+#if NET5_0_OR_GREATER
     public IReadOnlySet<Edge> FixedEdges => _fixedEdges;
+#else
+    public IReadOnlyCollection<Edge> FixedEdges => _fixedEdges;
+#endif
 
     /// <summary>
     /// Stores count of overlapping boundaries for a fixed edge.
@@ -161,9 +170,9 @@ public sealed class Triangulation
     // Private fields
     // -------------------------------------------------------------------------
 
-    private V2i[] _vertices = [];
+    private V2i[] _vertices = Array.Empty<V2i>();
     private int _verticesCount;
-    private Triangle[] _triangles = [];
+    private Triangle[] _triangles = Array.Empty<Triangle>();
     private int _trianglesCount;
     private readonly HashSet<Edge> _fixedEdges = new();
     private readonly Dictionary<Edge, ushort> _overlapCount = new();
@@ -176,7 +185,7 @@ public sealed class Triangulation
     private SuperGeometryType _superGeomType;
     private int _nTargetVerts;
 
-    private int[] _vertTris = [];
+    private int[] _vertTris = Array.Empty<int>();
     private int _vertTrisCount;
 
     private KdTree? _kdTree;

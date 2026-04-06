@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
 using CDT.Predicates;
@@ -326,6 +328,9 @@ public static partial class CdtUtils
     /// the right of the directed line from <paramref name="v1"/> to
     /// <paramref name="v2"/> using exact integer arithmetic.
     /// </summary>
+    /// <param name="p">The point to classify.</param>
+    /// <param name="v1">Start of the directed line.</param>
+    /// <param name="v2">End of the directed line.</param>
     /// <param name="areaSnapTolerance">
     /// Area-units tolerance: a point whose |Orient2dRaw| ≤ this value is
     /// classified as <see cref="PtLineLocation.OnLine"/>. Must be ≥ 0.

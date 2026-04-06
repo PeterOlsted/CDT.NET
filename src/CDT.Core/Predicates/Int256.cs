@@ -258,7 +258,7 @@ internal readonly struct Int256
     /// returns the result rounded half-away-from-zero as a <see cref="long"/>.
     /// </summary>
     /// <remarks>
-    /// Preconditions enforced with <see cref="System.Diagnostics.Debug.Assert"/>:
+    /// Preconditions enforced with <see cref="System.Diagnostics.Debug.Assert(bool)"/>:
     /// <list type="bullet">
     ///   <item><paramref name="denominator"/> ≠ 0.</item>
     ///   <item>The exact quotient fits in <see cref="long"/>
