@@ -10,7 +10,7 @@
     <File Path="README.md" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/UnityCDT/UnityCDT.csproj" />
+    <Project Path="src/UnityCDT.csproj" />
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/CDT.Tests/CDT.Tests.csproj" />
