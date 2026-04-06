@@ -44,6 +44,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="CDT.Tests" />
+    <InternalsVisibleTo Include="CDT.Benchmarks" />
   </ItemGroup>
 
 </Project>

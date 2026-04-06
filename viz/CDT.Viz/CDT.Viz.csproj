@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\CDT.Core\CDT.Core.csproj" />
+    <ProjectReference Include="..\..\src\UnityCDT\UnityCDT.csproj" />
   </ItemGroup>
 
   <ItemGroup>
