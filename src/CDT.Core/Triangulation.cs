@@ -4,7 +4,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Runtime.CompilerServices;
 using CDT.Predicates;
 using static CDT.CdtUtils;
@@ -100,7 +99,10 @@ internal sealed class CovariantReadOnlyDictionary<TKey, TInner, TOuter>
     public CovariantReadOnlyDictionary(Dictionary<TKey, TInner> inner) { this.inner = inner; }
     public TOuter this[TKey key] => inner[key];
     public IEnumerable<TKey> Keys => inner.Keys;
-    public IEnumerable<TOuter> Values => inner.Values.Cast<TOuter>();
+    public IEnumerable<TOuter> Values
+    {
+        get { foreach (var v in inner.Values) yield return (TOuter)(object)v!; }
+    }
     public int Count => inner.Count;
     public bool ContainsKey(TKey key) => inner.ContainsKey(key);
     public bool TryGetValue(TKey key, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out TOuter value)
@@ -109,8 +111,11 @@ internal sealed class CovariantReadOnlyDictionary<TKey, TInner, TOuter>
         value = default!;
         return false;
     }
-    public IEnumerator<KeyValuePair<TKey, TOuter>> GetEnumerator() =>
-        inner.Select(kv => new KeyValuePair<TKey, TOuter>(kv.Key, kv.Value)).GetEnumerator();
+    public IEnumerator<KeyValuePair<TKey, TOuter>> GetEnumerator()
+    {
+        foreach (var kv in inner)
+            yield return new KeyValuePair<TKey, TOuter>(kv.Key, kv.Value);
+    }
     System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
 // =========================================================================
